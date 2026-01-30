@@ -15,19 +15,26 @@ const ProtectedRoute = ({ children, allowedRole }) => {
   const storedUser = localStorage.getItem('user');
   
   if (!storedUser) {
-    // No one is logged in
     return <Navigate to="/login" replace />;
   }
 
-  const user = JSON.parse(storedUser);
+  try {
+    const user = JSON.parse(storedUser);
 
-  if (allowedRole && user.role !== allowedRole) {
-    // Logged in but trying to access a page they aren't allowed to see
-    alert(`Access Denied: You do not have ${allowedRole} privileges.`);
+    if (allowedRole && user.role !== allowedRole) {
+      // Logged in but trying to access a restricted page
+      alert(`Access Denied: You do not have ${allowedRole} privileges.`);
+      
+      // Redirect to their actual role-based dashboard instead of just login
+      return <Navigate to={`/${user.role}`} replace />;
+    }
+    
+    return children;
+  } catch (error) {
+    // If JSON is invalid, clear storage and send to login
+    localStorage.clear();
     return <Navigate to="/login" replace />;
   }
-
-  return children;
 };
 
 function App() {
@@ -68,7 +75,7 @@ function App() {
           } 
         />
         
-        {/* If user types a random URL, send them to login */}
+        {/* Catch-all: If user types a random URL, send them to login */}
         <Route path="*" element={<Navigate to="/login" />} />
       </Routes>
     </Router>

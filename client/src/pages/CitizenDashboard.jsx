@@ -6,6 +6,9 @@ import { Navigation, Search, ImageIcon, Video, X, Clock, Send, AlertCircle, Shie
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+// 1. DYNAMIC API URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 // Leaflet Icon Fix
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -13,8 +16,12 @@ let DefaultIcon = L.icon({ iconUrl: markerIcon, shadowUrl: markerShadow, iconSiz
 L.Marker.prototype.options.icon = DefaultIcon;
 
 const CitizenDashboard = () => {
-  // Get the logged-in user details from localStorage
-  const currentUser = JSON.parse(localStorage.getItem('user')) || {};
+  // Use a fallback to prevent crash if localStorage is empty
+  const [currentUser] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('user')) || {};
+    } catch { return {}; }
+  });
 
   const [position, setPosition] = useState([17.3850, 78.4867]);
   const [issueType, setIssueType] = useState('Flooding');
@@ -24,8 +31,8 @@ const CitizenDashboard = () => {
   const [myRequests, setMyRequests] = useState([]);
 
   const [formData, setFormData] = useState({
-    fullName: currentUser.name || "", // Default to logged-in user's name
-    mobile: currentUser.phone || "",  // Default to logged-in user's phone
+    fullName: currentUser.name || "",
+    mobile: currentUser.phone || "",
     landmark: "",
     pincode: "",
     imgUrl: "",
@@ -34,26 +41,23 @@ const CitizenDashboard = () => {
     details: {}
   });
 
-  // UPDATED: Sync only data belonging to the logged-in user
   const syncData = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/reports');
+      const response = await fetch(`${API_BASE_URL}/api/reports`);
       if (response.ok) {
         const data = await response.json();
-        
-        // Filter: Show only reports where reporter name matches current user
+        // BUG FIX: Added optional chaining to prevent crash if r.reporter is missing
         const filteredData = data.filter(r => 
-          r.reporter && r.reporter.name === currentUser.name
+          r.reporter?.name === currentUser.name
         );
-        
-        setMyRequests(filteredData); // Sorting is usually handled by backend sort({timestamp: -1})
+        setMyRequests(filteredData);
       }
     } catch (error) { console.error("Sync Error:", error); }
   };
 
   useEffect(() => {
     syncData();
-    const interval = setInterval(syncData, 5000);
+    const interval = setInterval(syncData, 10000); // 10s is safer for Render free tier
     return () => clearInterval(interval);
   }, []);
 
@@ -72,15 +76,14 @@ const CitizenDashboard = () => {
     if (!navigator.geolocation) return alert("Geolocation not supported");
     navigator.geolocation.getCurrentPosition((pos) => {
       setPosition([pos.coords.latitude, pos.coords.longitude]);
-    }, (err) => alert("Location access denied"));
+    }, (err) => alert("Location access denied. Please enable GPS."));
   };
 
-  // --- CHANGED: Smooth flyTo logic ---
   function MapController({ coords }) {
     const map = useMap();
     useEffect(() => { 
       if (coords) {
-        map.flyTo(coords, 18, { duration: 1.5 }); 
+        map.flyTo(coords, 16, { duration: 1.5 }); // 16 is better for general context
       }
     }, [coords, map]);
     return null;
@@ -103,7 +106,7 @@ const CitizenDashboard = () => {
       loc: position,
       status: "Pending",
       reporter: {
-        name: currentUser.name, // Strictly use the logged-in user's name for filtering
+        name: currentUser.name,
         phone: formData.mobile,
         pincode: formData.pincode,
         landmark: formData.landmark
@@ -117,7 +120,7 @@ const CitizenDashboard = () => {
     };
 
     try {
-      const response = await fetch('http://localhost:5000/api/reports', {
+      const response = await fetch(`${API_BASE_URL}/api/reports`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reportPayload),
@@ -126,9 +129,16 @@ const CitizenDashboard = () => {
       if (response.ok) {
         setHasSubmitted(true);
         setShowForm(false);
+        // Reset form for next report
+        setFormData(prev => ({ ...prev, landmark: "", pincode: "", imgUrl: "", vidUrl: "", consent: false }));
         syncData();
+      } else {
+        const errorData = await response.json();
+        alert(`Failed to submit: ${errorData.message || 'Unknown error'}`);
       }
-    } catch (error) { alert("Connection Error"); }
+    } catch (error) { 
+      alert("Server is waking up or unreachable. Please try again in a few seconds."); 
+    }
   };
 
   const renderOfficialFields = () => {
@@ -214,12 +224,12 @@ const CitizenDashboard = () => {
 
                 <Alert variant="info" className="py-2 small border-0 shadow-sm mb-4">
                   <AlertCircle size={14} className="me-2" />
-                  Logged in as: <strong>{currentUser.name}</strong>
+                  Logged in as: <strong>{currentUser.name || 'Citizen'}</strong>
                 </Alert>
 
                 <div className="mb-4">
                   <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">1. REPORTER DETAILS</h6>
-                  <Form.Control size="sm" readOnly value={currentUser.name} className="mb-2 bg-light" />
+                  <Form.Control size="sm" readOnly value={currentUser.name || ''} className="mb-2 bg-light" />
                   <Form.Control size="sm" required placeholder="Verify Mobile Number*" value={formData.mobile} className="mb-2" onChange={(e) => setFormData({...formData, mobile: e.target.value})} />
                 </div>
 
@@ -228,8 +238,8 @@ const CitizenDashboard = () => {
                   <div className="bg-dark text-white p-2 rounded mb-2 font-monospace small" style={{fontSize: '11px'}}>
                     COORDS: {position[0].toFixed(5)}, {position[1].toFixed(5)}
                   </div>
-                  <Form.Control size="sm" required placeholder="Landmark / Street Address*" className="mb-2" onChange={(e) => setFormData({...formData, landmark: e.target.value})} />
-                  <Form.Control size="sm" required placeholder="Pin Code*" className="mb-2" onChange={(e) => setFormData({...formData, pincode: e.target.value})} />
+                  <Form.Control size="sm" required placeholder="Landmark / Street Address*" className="mb-2" value={formData.landmark} onChange={(e) => setFormData({...formData, landmark: e.target.value})} />
+                  <Form.Control size="sm" required placeholder="Pin Code*" className="mb-2" value={formData.pincode} onChange={(e) => setFormData({...formData, pincode: e.target.value})} />
                 </div>
 
                 <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">3. INCIDENT CATEGORY</h6>
@@ -246,11 +256,11 @@ const CitizenDashboard = () => {
                   <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">4. EVIDENCE (LINKS)</h6>
                   <InputGroup size="sm" className="mb-2">
                     <InputGroup.Text><ImageIcon size={14}/></InputGroup.Text>
-                    <Form.Control placeholder="Photo URL*" required onChange={(e) => setFormData({...formData, imgUrl: e.target.value})} />
+                    <Form.Control placeholder="Photo URL*" required value={formData.imgUrl} onChange={(e) => setFormData({...formData, imgUrl: e.target.value})} />
                   </InputGroup>
                   <InputGroup size="sm" className="mb-2">
                     <InputGroup.Text><Video size={14}/></InputGroup.Text>
-                    <Form.Control placeholder="Video URL (Optional)" onChange={(e) => setFormData({...formData, vidUrl: e.target.value})} />
+                    <Form.Control placeholder="Video URL (Optional)" value={formData.vidUrl} onChange={(e) => setFormData({...formData, vidUrl: e.target.value})} />
                   </InputGroup>
                 </div>
 
@@ -259,6 +269,7 @@ const CitizenDashboard = () => {
                     type="checkbox" 
                     id="declaration" 
                     required
+                    checked={formData.consent}
                     label={<small className="fw-bold" style={{fontSize: '11px'}}>I declare the information provided is correct.</small>}
                     onChange={(e) => setFormData({...formData, consent: e.target.checked})}
                   />
@@ -284,7 +295,6 @@ const CitizenDashboard = () => {
                 
                 <ListGroup variant="flush">
                   {myRequests.length > 0 ? myRequests.slice(0, 8).map(r => (
-                    // --- CHANGED: Added onClick and cursor pointer for redirect logic ---
                     <ListGroup.Item 
                       key={r._id} 
                       className="px-0 py-3 border-bottom bg-transparent" 
