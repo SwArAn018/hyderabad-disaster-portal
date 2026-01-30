@@ -3,13 +3,15 @@ import { Container, Row, Col, Card, Form, Button, ToggleButtonGroup, ToggleButto
 import { ShieldCheck, User, HardHat, UserPlus, MapPin, Phone, Fingerprint } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+// This pulls from your Render environment variables, or defaults to localhost for your PC
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const Login = () => {
   const [role, setRole] = useState('citizen');
   const [credentials, setCredentials] = useState({ userid: '', password: '' });
   const [error, setError] = useState('');
   const [showReg, setShowReg] = useState(false);
   
-  // Detailed registration state
   const [regDetails, setRegDetails] = useState({
     name: '',
     phone: '',
@@ -37,7 +39,8 @@ const Login = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/login', {
+      // FIXED: Used backticks and API_BASE_URL
+      const response = await fetch(`${API_BASE_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -66,7 +69,8 @@ const Login = () => {
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('http://localhost:5000/api/users', {
+      // FIXED: Used backticks and API_BASE_URL
+      const response = await fetch(`${API_BASE_URL}/api/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -146,17 +150,16 @@ const Login = () => {
             </Card>
 
             <Button 
-  variant="danger" 
-  className="w-100 mt-3 d-flex align-items-center justify-content-center gap-2 py-3 fw-bold"
-  href="tel:+1234567890" // This triggers the phone dialer on mobile
->
-  <Phone size={20} /> CALL EMERGENCY DISPATCH
-</Button>
+              variant="danger" 
+              className="w-100 mt-3 d-flex align-items-center justify-content-center gap-2 py-3 fw-bold"
+              href="tel:+1234567890"
+            >
+              <Phone size={20} /> CALL EMERGENCY DISPATCH
+            </Button>
           </Col>
         </Row>
       </Container>
 
-      {/* DETAILED REGISTRATION MODAL */}
       <Modal show={showReg} onHide={() => setShowReg(false)} centered size="lg">
         <Modal.Header closeButton className="border-0">
           <Modal.Title className="fw-bold">Citizen Registration Form</Modal.Title>
