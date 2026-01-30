@@ -39,7 +39,6 @@ const Login = () => {
     }
 
     try {
-      // FIXED: Used backticks and API_BASE_URL
       const response = await fetch(`${API_BASE_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -53,7 +52,8 @@ const Login = () => {
       if (response.ok) {
         localStorage.setItem('user', JSON.stringify(data.user));
         if (data.user.role === 'worker') {
-          localStorage.setItem('userTeam', data.user.name); 
+          // CHANGE: Store 'dept' instead of 'name' so the dashboard filters by team
+          localStorage.setItem('userTeam', data.user.dept); 
           navigate('/worker');
         } else {
           navigate('/citizen');
@@ -69,14 +69,13 @@ const Login = () => {
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     try {
-      // FIXED: Used backticks and API_BASE_URL
       const response = await fetch(`${API_BASE_URL}/api/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...regDetails,
           role: 'citizen',
-          dept: 'None' 
+          // CHANGE: Removed dept: 'None' to keep the citizen database clean
         }),
       });
 

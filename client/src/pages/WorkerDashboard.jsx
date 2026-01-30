@@ -6,6 +6,8 @@ import { ClipboardList, Send, Image as ImageIcon, ShieldCheck, Users, MapPin, Na
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 // Leaflet Icon Fix
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -21,11 +23,17 @@ const WorkerDashboard = () => {
   const [evidence, setEvidence] = useState({ imageUrl: '', videoUrl: '', notes: '' });
   
   const getWorkerName = () => {
-    const directTeam = localStorage.getItem('userTeam');
-    if (directTeam) return directTeam;
+    // Priority 1: Use the specific team/dept string saved during login
+    const team = localStorage.getItem('userTeam');
+    if (team) return team;
+
+    // Priority 2: Fallback to the user object if team isn't set separately
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
-      try { return JSON.parse(storedUser).name; } catch (e) { return "Unassigned"; }
+      try { 
+        const user = JSON.parse(storedUser);
+        return user.dept || user.name || "Unassigned"; 
+      } catch (e) { return "Unassigned"; }
     }
     return "Unassigned";
   };
@@ -34,10 +42,12 @@ const WorkerDashboard = () => {
 
   const fetchTasks = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/reports');
+      const response = await fetch(`${API_BASE_URL}/api/reports`);
       const data = await response.json();
       // Filter tasks for the team that aren't resolved yet
-      const myTasks = data.filter(r => r.worker === workerTeam && r.status !== "Resolved");
+      const myTasks = data.filter(r => 
+        r.worker === workerTeam && r.status !== "Resolved"
+      );
       setTasks(myTasks.reverse());
     } catch (err) { console.error("Worker Sync Error:", err); }
   };
@@ -50,7 +60,7 @@ const WorkerDashboard = () => {
 
   const handleStatusChange = async (id, newStatus) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/reports/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/reports/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus }),
@@ -63,7 +73,7 @@ const WorkerDashboard = () => {
     if(!evidence.notes) return alert("Please add resolution notes.");
     try {
       const currentReport = tasks.find(t => t._id === activeTaskId);
-      const response = await fetch(`http://localhost:5000/api/reports/${activeTaskId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/reports/${activeTaskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -86,7 +96,8 @@ const WorkerDashboard = () => {
   };
 
   const openNavigation = (loc) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${loc[0]},${loc[1]}`;
+    // FIXED: Standard Google Maps Query format
+    const url = `https://www.google.com/maps?q=${loc[0]},${loc[1]}`;
     window.open(url, '_blank');
   };
 
@@ -132,7 +143,6 @@ const WorkerDashboard = () => {
                     <p className="text-muted small mb-3">Loc: {task.reporter?.landmark || "Standard Area"}</p>
 
                     <div className="d-grid gap-2">
-                      {/* VIEW MAP BUTTON */}
                       <Button 
                         variant="outline-secondary" 
                         size="sm" 
@@ -142,9 +152,6 @@ const WorkerDashboard = () => {
                         <MapPin size={14} className="me-2 text-danger"/> VIEW MISSION MAP
                       </Button>
 
-                      {/* WORKFLOW BUTTONS */}
-                      
-                      {/* STEP 1: START MISSION (For Assigned or Pending) */}
                       {(task.status === "Assigned" || task.status === "Pending") && (
                         <Button 
                           variant="primary" 
@@ -156,7 +163,6 @@ const WorkerDashboard = () => {
                         </Button>
                       )}
 
-                      {/* STEP 2: CONFIRM ARRIVAL (Only shows after mission started) */}
                       {task.status === "Accepted" && (
                         <Button 
                           variant="warning" 
@@ -168,7 +174,6 @@ const WorkerDashboard = () => {
                         </Button>
                       )}
 
-                      {/* STEP 3: SUBMIT RESOLUTION (Only shows after arrival confirmed) */}
                       {task.status === "Arrived" && (
                         <Button 
                           variant="dark" 
@@ -203,7 +208,6 @@ const WorkerDashboard = () => {
         </Row>
       </Container>
 
-      {/* NAVIGATION MODAL */}
       <Modal show={showMapModal} onHide={() => setShowMapModal(false)} size="lg" centered>
         <Modal.Header closeButton>
           <Modal.Title className="fs-6 fw-bold">Incident Navigation</Modal.Title>
@@ -231,7 +235,6 @@ const WorkerDashboard = () => {
         </Modal.Body>
       </Modal>
 
-      {/* RESOLUTION FORM */}
       <Modal show={showForm} onHide={() => setShowForm(false)} centered>
         <Modal.Header closeButton className="bg-light">
           <Modal.Title className="fs-6 fw-bold">Resolution Evidence</Modal.Title>
