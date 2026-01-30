@@ -7,7 +7,11 @@ const User = require('./models/User');
 
 const app = express();
 app.use(express.json());
-app.use(cors());
+// Replace app.use(cors()); with this:
+app.use(cors({
+    origin: ["https://hyderabad-disaster-frontend.onrender.com", "http://localhost:5173"],
+    credentials: true
+}));
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("✅ Connected to MongoDB Atlas"))
