@@ -50,7 +50,6 @@ const AdminDashboard = () => {
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
 
-  // UPDATED: Default dept to a more professional one
   const [regData, setRegData] = useState({ name: "", password: "", dept: "URBAN_GENERAL_DEPT", phone: "" });
   const [issueType, setIssueType] = useState('Flooding');
   const [manualData, setManualData] = useState({
@@ -59,12 +58,11 @@ const AdminDashboard = () => {
 
   const stats = {
     new: reports.filter(r => r.status === "Pending Approval" || r.status === "Pending").length,
-    inProgress: reports.filter(r => r.status === "Accepted" || r.status === "In Progress").length,
+    inProgress: reports.filter(r => r.status === "Accepted" || r.status === "In Progress" || r.status === "Assigned").length,
     verifying: reports.filter(r => r.status === "Submitted for Review").length,
     resolved: reports.filter(r => r.status === "Resolved").length
   };
 
-  // 2. FIXED FETCH URLS
   const fetchData = async () => {
     try {
       const reportRes = await fetch(`${API_BASE_URL}/api/reports`);
@@ -82,7 +80,6 @@ const AdminDashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // 3. FIXED POST URL
   const handleManualSubmit = async (e) => {
     e.preventDefault();
     const payload = {
@@ -117,7 +114,6 @@ const AdminDashboard = () => {
     } catch (err) { console.error("Manual entry failed", err); }
   };
 
-  // 4. FIXED REGISTER URL
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
@@ -134,19 +130,18 @@ const AdminDashboard = () => {
     } catch (err) { console.error(err); }
   };
 
-  // 5. FIXED ASSIGN URL
-  const assignWorker = async (reportId, workerName) => {
+  // UPDATED: Logic to use Dept ID (workerDept) instead of Name
+  const assignWorker = async (reportId, workerDept) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/reports/${reportId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: "Accepted", worker: workerName }),
+        body: JSON.stringify({ status: "Assigned", worker: workerDept }),
       });
       if (response.ok) fetchData();
     } catch (err) { console.error(err); }
   };
 
-  // 6. FIXED RESOLVE URL
   const resolveTask = async (reportId) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/reports/${reportId}`, {
@@ -244,7 +239,6 @@ const AdminDashboard = () => {
                       <Col md={6}><Form.Control size="sm" placeholder="Name" required value={regData.name} onChange={(e) => setRegData({...regData, name: e.target.value})} /></Col>
                       <Col md={6}><Form.Control size="sm" type="password" placeholder="Pass" required value={regData.password} onChange={(e) => setRegData({...regData, password: e.target.value})} /></Col>
                       <Col md={6}>
-                        {/* UPDATED: Professional Dept Names */}
                         <Form.Select size="sm" value={regData.dept} onChange={(e) => setRegData({...regData, dept: e.target.value})}>
                           <option value="URBAN_WATER_DEPT">Water & Flood</option>
                           <option value="URBAN_INFRA_DEPT">Infrastructure</option>
@@ -260,7 +254,6 @@ const AdminDashboard = () => {
                 </Card.Body>
               </Card>
 
-              {/* ... Rest of your UI components (QA, Incoming Feed, Modals) remain the same ... */}
               <Card className="border-0 shadow-sm border-start border-info border-4">
                 <Card.Header className="bg-white fw-bold d-flex justify-content-between">
                   <span><ShieldAlert size={18} className="me-2 text-info"/> Quality Assurance</span>
@@ -291,7 +284,12 @@ const AdminDashboard = () => {
                         <Dropdown onClick={(e) => e.stopPropagation()}>
                           <Dropdown.Toggle size="sm" variant="outline-primary">Assign</Dropdown.Toggle>
                           <Dropdown.Menu>
-                            {workers.map(w => <Dropdown.Item key={w._id} onClick={() => assignWorker(r._id, w.name)}>{w.name}</Dropdown.Item>)}
+                            {/* UPDATED: Dropdown now assigns worker.dept (ID) instead of worker.name */}
+                            {workers.map(w => (
+                              <Dropdown.Item key={w._id} onClick={() => assignWorker(r._id, w.dept)}>
+                                {w.name} ({w.dept})
+                              </Dropdown.Item>
+                            ))}
                           </Dropdown.Menu>
                         </Dropdown>
                       </ListGroup.Item>
