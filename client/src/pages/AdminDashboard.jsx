@@ -6,6 +6,9 @@ import { CheckCircle, Eye, UserPlus, Inbox, Activity, ShieldAlert, Video, MapPin
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
+// 1. ADDED API BASE URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 // --- Leaflet Icon Fix & Custom Icons ---
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
@@ -75,7 +78,7 @@ const AdminDashboard = () => {
   const [showManualModal, setShowManualModal] = useState(false);
   const [selectedReport, setSelectedReport] = useState(null);
 
-  const [regData, setRegData] = useState({ name: "", password: "", dept: "Sanitation", phone: "" });
+  const [regData, setRegData] = useState({ name: "", password: "", dept: "URBAN_GENERAL_DEPT", phone: "" });
   const [issueType, setIssueType] = useState('Flooding');
   const [manualData, setManualData] = useState({
     name: "", mobile: "", landmark: "", pincode: "", imgUrl: "", vidUrl: "", lat: 17.3850, lng: 78.4867, details: {}
@@ -84,6 +87,7 @@ const AdminDashboard = () => {
   const stats = {
     new: reports.filter(r => r.status === "Pending Approval" || r.status === "Pending").length,
     inProgress: reports.filter(r => r.status === "Accepted" || r.status === "In Progress" || r.status === "Arrived").length,
+    inProgress: reports.filter(r => r.status === "Accepted" || r.status === "In Progress" || r.status === "Assigned").length,
     verifying: reports.filter(r => r.status === "Submitted for Review").length,
     resolved: reports.filter(r => r.status === "Resolved").length
   };
@@ -111,10 +115,10 @@ const fetchWeatherGrid = async () => {
 
   const fetchData = async () => {
     try {
-      const reportRes = await fetch('http://localhost:5000/api/reports');
+      const reportRes = await fetch(`${API_BASE_URL}/api/reports`);
       const reportData = await reportRes.json();
       setReports(reportData);
-      const workerRes = await fetch('http://localhost:5000/api/users/workers');
+      const workerRes = await fetch(`${API_BASE_URL}/api/users/workers`);
       const workerData = await workerRes.json();
       setWorkers(workerData);
     } catch (err) { console.error("Data load failed:", err); }
@@ -155,7 +159,7 @@ const fetchWeatherGrid = async () => {
     };
 
     try {
-      const res = await fetch('http://localhost:5000/api/reports', {
+      const res = await fetch(`${API_BASE_URL}/api/reports`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -171,25 +175,26 @@ const fetchWeatherGrid = async () => {
   const handleRegister = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('http://localhost:5000/api/users', {
+      const response = await fetch(`${API_BASE_URL}/api/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...regData, role: 'worker' }),
       });
       if (response.ok) {
         alert(`Team ${regData.name} registered!`);
-        setRegData({ name: "", password: "", dept: "Sanitation", phone: "" });
+        setRegData({ name: "", password: "", dept: "URBAN_GENERAL_DEPT", phone: "" });
         fetchData();
       }
     } catch (err) { console.error(err); }
   };
 
-  const assignWorker = async (reportId, workerName) => {
+  // UPDATED: Logic to use Dept ID (workerDept) instead of Name
+  const assignWorker = async (reportId, workerDept) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/reports/${reportId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/reports/${reportId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: "Accepted", worker: workerName }),
+        body: JSON.stringify({ status: "Assigned", worker: workerDept }),
       });
       if (response.ok) fetchData();
     } catch (err) { console.error(err); }
@@ -197,7 +202,7 @@ const fetchWeatherGrid = async () => {
 
   const resolveTask = async (reportId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/reports/${reportId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/reports/${reportId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: "Resolved", timestamp: new Date().toISOString() }),
@@ -329,7 +334,11 @@ const fetchWeatherGrid = async () => {
                       <Col md={6}><Form.Control size="sm" type="password" placeholder="Pass" required value={regData.password} onChange={(e) => setRegData({...regData, password: e.target.value})} /></Col>
                       <Col md={6}>
                         <Form.Select size="sm" value={regData.dept} onChange={(e) => setRegData({...regData, dept: e.target.value})}>
-                          <option>Sanitation</option><option>Rescue</option><option>Electric</option>
+                          <option value="URBAN_WATER_DEPT">Water & Flood</option>
+                          <option value="URBAN_INFRA_DEPT">Infrastructure</option>
+                          <option value="URBAN_SANITATION_DEPT">Sanitation</option>
+                          <option value="URBAN_POWER_DEPT">Power/Electric</option>
+                          <option value="URBAN_GENERAL_DEPT">General Control</option>
                         </Form.Select>
                       </Col>
                       <Col md={6}><Form.Control size="sm" placeholder="Phone" required value={regData.phone} onChange={(e) => setRegData({...regData, phone: e.target.value})} /></Col>
@@ -380,6 +389,12 @@ const fetchWeatherGrid = async () => {
                                 </div>
                               </Dropdown.Item>
                             ))}
+                            {/* UPDATED: Dropdown now assigns worker.dept (ID) instead of worker.name */}
+                            {workers.map(w => (
+                              <Dropdown.Item key={w._id} onClick={() => assignWorker(r._id, w.dept)}>
+                                {w.name} ({w.dept})
+                              </Dropdown.Item>
+                            ))}
                           </Dropdown.Menu>
                         </Dropdown>
                       </ListGroup.Item>
@@ -393,6 +408,7 @@ const fetchWeatherGrid = async () => {
       </Container>
 
       {/* MANUAL ENTRY MODAL */}
+      {/* Manual Modal */}
       <Modal show={showManualModal} onHide={() => setShowManualModal(false)} size="lg" centered>
         <Modal.Header closeButton className="bg-danger text-white">
           <Modal.Title className="fs-6 fw-bold">OFFICIAL MANUAL REPORT ENTRY</Modal.Title>
@@ -487,6 +503,7 @@ const fetchWeatherGrid = async () => {
 
 
       {/* AUDIT MODAL WITH WORKER VERIFICATION */}
+      {/* Audit Modal */}
       <Modal show={showAuditModal} onHide={() => setShowAuditModal(false)} size="lg" centered>
         <Modal.Header closeButton className="bg-dark text-white">
           <Modal.Title className="fs-6">Incident Audit & Truth Check</Modal.Title>
@@ -573,6 +590,7 @@ const fetchWeatherGrid = async () => {
                     alt="Evidence" 
                     style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} 
                   />
+                  <img src={selectedReport.evidence.img} alt="Evidence" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} />
                 ) : (
                   <div className="text-muted small p-4">No image evidence uploaded yet.</div>
                 )}
@@ -580,12 +598,15 @@ const fetchWeatherGrid = async () => {
                   <div className="mt-3 p-2 bg-white rounded border text-start small italic">
                     <strong>Worker Notes:</strong> "{selectedReport.evidence.notes}"
                   </div>
+                  <div className="text-muted small p-4">No image evidence uploaded.</div>
                 )}
               </div>
 
               {selectedReport.status === "Submitted for Review" && (
                 <Button variant="success" className="w-100 fw-bold py-2 shadow-sm" onClick={() => resolveTask(selectedReport._id)}>
                   <CheckCircle size={18} className="me-2"/> APPROVE & RESOLVE INCIDENT
+                <Button variant="success" className="w-100 fw-bold py-2" onClick={() => resolveTask(selectedReport._id)}>
+                  VERIFY & MARK AS RESOLVED
                 </Button>
               )}
             </>
