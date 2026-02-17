@@ -85,9 +85,8 @@ const AdminDashboard = () => {
   });
 
   const stats = {
-    new: reports.filter(r => r.status === "Pending Approval" || r.status === "Pending").length,
-    inProgress: reports.filter(r => r.status === "Accepted" || r.status === "In Progress" || r.status === "Arrived").length,
-    inProgress: reports.filter(r => r.status === "Accepted" || r.status === "In Progress" || r.status === "Assigned").length,
+    new: reports.filter(r => ["Pending Approval", "Pending"].includes(r.status)).length,
+    inProgress: reports.filter(r => ["Accepted", "In Progress", "Arrived", "Assigned"].includes(r.status)).length,
     verifying: reports.filter(r => r.status === "Submitted for Review").length,
     resolved: reports.filter(r => r.status === "Resolved").length
   };
@@ -381,21 +380,18 @@ const fetchWeatherGrid = async () => {
                         <Dropdown onClick={(e) => e.stopPropagation()}>
                           <Dropdown.Toggle size="sm" variant="outline-primary">Assign</Dropdown.Toggle>
                           <Dropdown.Menu>
-                            {workers.map(w => (
-                              <Dropdown.Item key={w._id} onClick={() => assignWorker(r._id, w.name)}>
-                                <div className="d-flex justify-content-between align-items-center" style={{minWidth: '160px'}}>
-                                  <span>{w.name}</span>
-                                  <Badge bg="secondary" style={{fontSize: '0.65rem'}}>{w.dept}</Badge>
-                                </div>
-                              </Dropdown.Item>
-                            ))}
-                            {/* UPDATED: Dropdown now assigns worker.dept (ID) instead of worker.name */}
-                            {workers.map(w => (
-                              <Dropdown.Item key={w._id} onClick={() => assignWorker(r._id, w.dept)}>
-                                {w.name} ({w.dept})
-                              </Dropdown.Item>
-                            ))}
-                          </Dropdown.Menu>
+  {workers.map(w => (
+    <Dropdown.Item key={w._id} onClick={() => assignWorker(r._id, w.dept)}>
+      <div className="d-flex justify-content-between align-items-center" style={{minWidth: '180px'}}>
+        <div>
+          <div className="fw-bold">{w.name}</div>
+          <small className="text-muted">{w.dept}</small>
+        </div>
+        <Badge bg="secondary" pill style={{fontSize: '0.6rem'}}>Assign</Badge>
+      </div>
+    </Dropdown.Item>
+  ))}
+</Dropdown.Menu>
                         </Dropdown>
                       </ListGroup.Item>
                     ))}
@@ -583,34 +579,45 @@ const fetchWeatherGrid = async () => {
               </Table>
 
               <h6 className="fw-bold mt-3 small text-muted"><ImageIcon size={14} className="me-1"/> RESOLUTION EVIDENCE</h6>
-              <div className="p-3 border rounded bg-light mb-3 text-center">
-                {selectedReport.evidence?.img ? (
-                  <img 
-                    src={selectedReport.evidence.img} 
-                    alt="Evidence" 
-                    style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} 
-                  />
-                  <img src={selectedReport.evidence.img} alt="Evidence" style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }} />
-                ) : (
-                  <div className="text-muted small p-4">No image evidence uploaded yet.</div>
-                )}
-                {selectedReport.evidence?.notes && (
-                  <div className="mt-3 p-2 bg-white rounded border text-start small italic">
-                    <strong>Worker Notes:</strong> "{selectedReport.evidence.notes}"
-                  </div>
-                  <div className="text-muted small p-4">No image evidence uploaded.</div>
-                )}
-              </div>
+              <h6 className="fw-bold mt-3 small text-muted"><ImageIcon size={14} className="me-1"/> RESOLUTION EVIDENCE</h6>
+<div className="p-3 border rounded bg-light mb-3 text-center">
+  {selectedReport.evidence?.img ? (
+    <img 
+      src={selectedReport.evidence.img} 
+      alt="Incident Evidence" 
+      className="img-fluid shadow-sm"
+      style={{ maxHeight: '300px', borderRadius: '8px', objectFit: 'contain' }} 
+    />
+  ) : (
+    <div className="text-muted small p-4">No image evidence uploaded yet.</div>
+  )}
+  
+  {selectedReport.evidence?.notes && (
+    <div className="mt-3 p-2 bg-white rounded border text-start small border-start border-4 border-info">
+      <strong>Worker Notes:</strong> <span className="fst-italic">"{selectedReport.evidence.notes}"</span>
+    </div>
+  )}
+</div>
 
               {selectedReport.status === "Submitted for Review" && (
-                <Button variant="success" className="w-100 fw-bold py-2 shadow-sm" onClick={() => resolveTask(selectedReport._id)}>
-                  <CheckCircle size={18} className="me-2"/> APPROVE & RESOLVE INCIDENT
-                <Button variant="success" className="w-100 fw-bold py-2" onClick={() => resolveTask(selectedReport._id)}>
-                  VERIFY & MARK AS RESOLVED
-                </Button>
+  <div className="mt-3">
+    <Button 
+      variant="success" 
+      className="w-100 fw-bold py-3 shadow-sm d-flex align-items-center justify-content-center" 
+      onClick={() => resolveTask(selectedReport._id)}
+    >
+      <CheckCircle size={20} className="me-2"/> 
+      VERIFY & MARK AS RESOLVED
+    </Button>
+    <div className="text-center mt-2">
+       <small className="text-muted text-uppercase fw-bold" style={{fontSize: '0.65rem'}}>
+         Final approval will archive this report to the resolved feed
+       </small>
+    </div>
+  </div>
               )}
-            </>
-          )}
+  </>
+)}
         </Modal.Body>
       </Modal>
     </div>

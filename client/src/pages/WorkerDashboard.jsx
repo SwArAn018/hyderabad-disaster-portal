@@ -136,7 +136,7 @@ const WorkerDashboard = () => {
   };
 
   const openNavigation = (loc) => {
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${loc[0]},${loc[1]}`;
+    const url = `https://www.google.com/search?q=https://www.google.com/maps%3Fq%3D${loc[0]},${loc[1]}`;
     window.open(url, '_blank');
   };
 
