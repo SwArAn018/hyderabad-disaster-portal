@@ -5,6 +5,7 @@ import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Rectangle } from
 import { Navigation, Search, ImageIcon, Video, X, Clock, Send, AlertCircle, ShieldCheck, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 // --- HYDERABAD BOUNDARY CONSTANTS ---
 const HYDERABAD_BOUNDS = {
@@ -56,7 +57,9 @@ const CitizenDashboard = () => {
 const fetchAlerts = async () => {
   // 1. First, keep fetching your custom admin-broadcasted alerts from your backend
   try {
-    const adminRes = await fetch('http://localhost:5000/api/alerts');
+    const adminRes = await fetch(`${API_BASE_URL}/api/alerts`
+      
+    );
     if (adminRes.ok) {
       const adminData = await adminRes.json();
       
@@ -105,7 +108,7 @@ const fetchAlerts = async () => {
 
   const syncData = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/reports');
+      const response = await fetch(`${API_BASE_URL}/api/reports`);
       if (response.ok) {
         const data = await response.json();
         const filteredData = data.filter(r => 
@@ -191,9 +194,11 @@ const fetchAlerts = async () => {
     };
 
     try {
-      const response = await fetch('http://localhost:5000/api/reports', {
+      const response = await fetch(`${API_BASE_URL}/api/reports`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+
+
         body: JSON.stringify(reportPayload),
       });
 
