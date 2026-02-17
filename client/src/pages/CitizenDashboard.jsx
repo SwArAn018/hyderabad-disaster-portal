@@ -1,10 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Form, Button, InputGroup, Badge, ListGroup, Alert } from 'react-bootstrap';
 import AppNavbar from '../components/Navbar';
-import { MapContainer, TileLayer, Marker, useMapEvents, useMap } from 'react-leaflet';
-import { Navigation, Search, ImageIcon, Video, X, Clock, Send, AlertCircle, ShieldCheck } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Rectangle } from 'react-leaflet'; 
+import { Navigation, Search, ImageIcon, Video, X, Clock, Send, AlertCircle, ShieldCheck, AlertTriangle } from 'lucide-react'; // Added AlertTriangle
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+
+// --- HYDERABAD BOUNDARY CONSTANTS ---
+const HYDERABAD_BOUNDS = {
+  minLat: 17.20,
+  maxLat: 17.60,
+  minLng: 78.20,
+  maxLng: 78.60
+};
+
+const isInsideHyderabad = (lat, lng) => {
+  return (
+    lat >= HYDERABAD_BOUNDS.minLat &&
+    lat <= HYDERABAD_BOUNDS.maxLat &&
+    lng >= HYDERABAD_BOUNDS.minLng &&
+    lng <= HYDERABAD_BOUNDS.maxLng
+  );
+};
 
 // Leaflet Icon Fix
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
@@ -13,7 +30,6 @@ let DefaultIcon = L.icon({ iconUrl: markerIcon, shadowUrl: markerShadow, iconSiz
 L.Marker.prototype.options.icon = DefaultIcon;
 
 const CitizenDashboard = () => {
-  // Get the logged-in user details from localStorage
   const currentUser = JSON.parse(localStorage.getItem('user')) || {};
 
   const [position, setPosition] = useState([17.3850, 78.4867]);
@@ -22,10 +38,11 @@ const CitizenDashboard = () => {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [showForm, setShowForm] = useState(true); 
   const [myRequests, setMyRequests] = useState([]);
+  const [activeAlerts, setActiveAlerts] = useState([]); // NEW: State for proactive alerts
 
   const [formData, setFormData] = useState({
-    fullName: currentUser.name || "", // Default to logged-in user's name
-    mobile: currentUser.phone || "",  // Default to logged-in user's phone
+    fullName: currentUser.name || "", 
+    mobile: currentUser.phone || "",  
     landmark: "",
     pincode: "",
     imgUrl: "",
@@ -34,26 +51,78 @@ const CitizenDashboard = () => {
     details: {}
   });
 
-  // UPDATED: Sync only data belonging to the logged-in user
+  // NEW: Fetch proactive alerts from backend
+  // --- NEW: LIVE WEATHER INTEGRATION ---
+const fetchAlerts = async () => {
+  // 1. First, keep fetching your custom admin-broadcasted alerts from your backend
+  try {
+    const adminRes = await fetch('http://localhost:5000/api/alerts');
+    if (adminRes.ok) {
+      const adminData = await adminRes.json();
+      
+      // 2. NOW, fetch LIVE weather for the current map position
+      // Replace 'YOUR_API_KEY' with a free key from openweathermap.org
+      const API_KEY = "YOUR_API_KEY"; 
+      const [lat, lon] = position;
+      const weatherRes = await fetch(
+        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`
+      );
+
+      if (weatherRes.ok) {
+        const weatherData = await weatherRes.json();
+        const condition = weatherData.weather[0].main; // e.g., "Rain", "Clear", "Thunderstorm"
+        const temp = weatherData.main.temp;
+
+        // 3. Create a "Live" alert object if conditions are bad
+        let liveAlert = null;
+        if (condition === "Rain" || condition === "Thunderstorm" || condition === "Drizzle") {
+          liveAlert = {
+            _id: "live-weather-001",
+            title: `LIVE: ${condition} Detected`,
+            severity: "Orange",
+            area: "Current Location",
+            message: `Current temp ${temp}°C. Heavy rainfall may cause waterlogging. Please plan your route accordingly.`
+          };
+        } else if (temp > 40) {
+          liveAlert = {
+            _id: "live-weather-002",
+            title: "LIVE: Extreme Heat Warning",
+            severity: "Orange",
+            area: "Current Location",
+            message: "Temperatures are above 40°C. Stay hydrated and avoid outdoor reporting if possible."
+          };
+        }
+
+        // 4. Combine Admin alerts with our new Live Weather alert
+        const combinedAlerts = liveAlert ? [liveAlert, ...adminData] : adminData;
+        setActiveAlerts(combinedAlerts);
+      }
+    }
+  } catch (error) { 
+    console.error("Alert/Weather Sync Error:", error); 
+  }
+};
+
   const syncData = async () => {
     try {
       const response = await fetch('http://localhost:5000/api/reports');
       if (response.ok) {
         const data = await response.json();
-        
-        // Filter: Show only reports where reporter name matches current user
         const filteredData = data.filter(r => 
           r.reporter && r.reporter.name === currentUser.name
         );
-        
-        setMyRequests(filteredData); // Sorting is usually handled by backend sort({timestamp: -1})
+        setMyRequests(filteredData);
       }
     } catch (error) { console.error("Sync Error:", error); }
   };
 
   useEffect(() => {
     syncData();
-    const interval = setInterval(syncData, 5000);
+    fetchAlerts(); // Initial Alert fetch
+    const interval = setInterval(() => {
+        syncData();
+        fetchAlerts(); // Check for new alerts every 5 seconds
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -75,7 +144,6 @@ const CitizenDashboard = () => {
     }, (err) => alert("Location access denied"));
   };
 
-  // --- CHANGED: Smooth flyTo logic ---
   function MapController({ coords }) {
     const map = useMap();
     useEffect(() => { 
@@ -96,6 +164,12 @@ const CitizenDashboard = () => {
 
   const handleFinalSubmit = async (e) => {
     e.preventDefault();
+
+    if (!isInsideHyderabad(position[0], position[1])) {
+      alert("⚠️ OUT OF SERVICE AREA: Please select a location within Hyderabad city limits.");
+      return;
+    }
+
     if (!formData.consent) return alert("Please accept the declaration to proceed.");
 
     const reportPayload = {
@@ -103,7 +177,7 @@ const CitizenDashboard = () => {
       loc: position,
       status: "Pending",
       reporter: {
-        name: currentUser.name, // Strictly use the logged-in user's name for filtering
+        name: currentUser.name,
         phone: formData.mobile,
         pincode: formData.pincode,
         landmark: formData.landmark
@@ -192,14 +266,38 @@ const CitizenDashboard = () => {
                 <Navigation size={24} className="text-primary" />
             </Button>
 
-            <MapContainer center={position} zoom={15} style={{ height: '100%', width: '100%' }}>
+            <MapContainer center={position} zoom={13} style={{ height: '100%', width: '100%' }}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              <Rectangle 
+                bounds={[[HYDERABAD_BOUNDS.minLat, HYDERABAD_BOUNDS.minLng], [HYDERABAD_BOUNDS.maxLat, HYDERABAD_BOUNDS.maxLng]]} 
+                pathOptions={{ color: 'red', weight: 2, fillOpacity: 0.05, dashArray: '5, 10' }}
+              />
               <LocationPicker />
               <MapController coords={position} />
             </MapContainer>
           </Col>
 
           <Col md={5} lg={4} className="bg-white shadow-lg overflow-auto p-4 border-start" style={{zIndex: 1001}}>
+            
+            {/* --- NEW: PROACTIVE ALERTS SECTION --- */}
+            {activeAlerts.length > 0 && activeAlerts.map(alert => (
+              <Alert 
+                key={alert._id} 
+                variant={alert.severity === 'Red' ? 'danger' : alert.severity === 'Orange' ? 'warning' : 'info'} 
+                className="mb-3 border-2 shadow-sm d-flex align-items-center animate__animated animate__fadeInDown"
+              >
+                <AlertTriangle className="me-3 text-dark" size={28} />
+                <div>
+                  <div className="fw-bold d-flex align-items-center">
+                    {alert.title} 
+                    <Badge bg="dark" className="ms-2" style={{fontSize: '10px'}}>{alert.area}</Badge>
+                  </div>
+                  <div className="small text-dark">{alert.message}</div>
+                </div>
+              </Alert>
+            ))}
+            {/* ------------------------------------ */}
+
             {showForm ? (
               <Form onSubmit={handleFinalSubmit}>
                 <div className="d-flex justify-content-between align-items-start mb-3">
@@ -212,10 +310,12 @@ const CitizenDashboard = () => {
                   </Button>
                 </div>
 
-                <Alert variant="info" className="py-2 small border-0 shadow-sm mb-4">
-                  <AlertCircle size={14} className="me-2" />
-                  Logged in as: <strong>{currentUser.name}</strong>
-                </Alert>
+                {!isInsideHyderabad(position[0], position[1]) && (
+                  <Alert variant="danger" className="py-2 small mb-3">
+                    <AlertCircle size={14} className="me-2" />
+                    <strong>Location Out of Bounds:</strong> Move the marker inside the red box.
+                  </Alert>
+                )}
 
                 <div className="mb-4">
                   <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">1. REPORTER DETAILS</h6>
@@ -225,7 +325,7 @@ const CitizenDashboard = () => {
 
                 <div className="mb-4">
                   <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">2. INCIDENT LOCATION</h6>
-                  <div className="bg-dark text-white p-2 rounded mb-2 font-monospace small" style={{fontSize: '11px'}}>
+                  <div className={`p-2 rounded mb-2 font-monospace small ${!isInsideHyderabad(position[0], position[1]) ? 'bg-danger text-white' : 'bg-dark text-white'}`} style={{fontSize: '11px'}}>
                     COORDS: {position[0].toFixed(5)}, {position[1].toFixed(5)}
                   </div>
                   <Form.Control size="sm" required placeholder="Landmark / Street Address*" className="mb-2" onChange={(e) => setFormData({...formData, landmark: e.target.value})} />
@@ -264,7 +364,7 @@ const CitizenDashboard = () => {
                   />
                 </div>
 
-                <Button type="submit" variant="danger" className="w-100 py-2 fw-bold">
+                <Button type="submit" variant="danger" className="w-100 py-2 fw-bold" disabled={!isInsideHyderabad(position[0], position[1])}>
                   SUBMIT OFFICIAL REPORT
                 </Button>
               </Form>
@@ -281,10 +381,8 @@ const CitizenDashboard = () => {
                 )}
 
                 <h6 className="fw-bold text-dark mb-3 border-bottom pb-2">MY SUBMISSIONS</h6>
-                
                 <ListGroup variant="flush">
                   {myRequests.length > 0 ? myRequests.slice(0, 8).map(r => (
-                    // --- CHANGED: Added onClick and cursor pointer for redirect logic ---
                     <ListGroup.Item 
                       key={r._id} 
                       className="px-0 py-3 border-bottom bg-transparent" 

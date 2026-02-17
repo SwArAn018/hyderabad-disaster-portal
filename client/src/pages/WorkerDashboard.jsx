@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Card, Button, Badge, Modal, Form, InputGroup, Spinner, Row, Col } from 'react-bootstrap';
 import AppNavbar from '../components/Navbar';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { ClipboardList, Send, Image as ImageIcon, ShieldCheck, Users, MapPin, Navigation, Clock } from 'lucide-react';
+import { ClipboardList, Send, Image as ImageIcon, ShieldCheck, Users, MapPin, Navigation, Clock, CloudRain, AlertTriangle, Map as MapIcon } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -19,6 +19,7 @@ const WorkerDashboard = () => {
   const [activeTask, setActiveTask] = useState(null); 
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [evidence, setEvidence] = useState({ imageUrl: '', videoUrl: '', notes: '' });
+  const [isVerifying, setIsVerifying] = useState(false); // NEW: Track GPS verification status
   
   const getWorkerName = () => {
     const directTeam = localStorage.getItem('userTeam');
@@ -32,11 +33,22 @@ const WorkerDashboard = () => {
 
   const workerTeam = getWorkerName();
 
+  // --- NEW: Haversine Formula to calculate distance in meters ---
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Earth radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; 
+  };
+
   const fetchTasks = async () => {
     try {
       const response = await fetch('http://localhost:5000/api/reports');
       const data = await response.json();
-      // Filter tasks for the team that aren't resolved yet
       const myTasks = data.filter(r => r.worker === workerTeam && r.status !== "Resolved");
       setTasks(myTasks.reverse());
     } catch (err) { console.error("Worker Sync Error:", err); }
@@ -48,15 +60,53 @@ const WorkerDashboard = () => {
     return () => clearInterval(interval);
   }, [workerTeam]);
 
-  const handleStatusChange = async (id, newStatus) => {
+  // Updated to accept extraData (like verifiedLocation)
+  const handleStatusChange = async (id, newStatus, extraData = {}) => {
     try {
       const response = await fetch(`http://localhost:5000/api/reports/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, ...extraData }),
       });
       if (response.ok) fetchTasks(); 
     } catch (err) { alert("Failed to update status."); }
+  };
+
+  // --- NEW: Geofence Verification Logic ---
+  const handleArrivalVerification = (task) => {
+    if (!navigator.geolocation) return alert("Geolocation is not supported by your browser.");
+
+    setIsVerifying(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const workerLat = position.coords.latitude;
+        const workerLng = position.coords.longitude;
+        const [targetLat, targetLng] = task.loc;
+
+        const distance = calculateDistance(workerLat, workerLng, targetLat, targetLng);
+        const MAX_DISTANCE = 200; // 200 meters geofence
+
+        if (distance > MAX_DISTANCE) {
+          alert(`Verification Failed! You are ${Math.round(distance)}m away. You must be within 200m to mark arrival.`);
+          setIsVerifying(false);
+        } else {
+          // Success: Pass verified location to backend
+          await handleStatusChange(task._id, "Arrived", {
+            verifiedLocation: {
+              lat: workerLat,
+              lng: workerLng,
+              distanceFromSite: Math.round(distance)
+            }
+          });
+          setIsVerifying(false);
+        }
+      },
+      (error) => {
+        alert("Location Access Denied. Please enable GPS to verify arrival.");
+        setIsVerifying(false);
+      },
+      { enableHighAccuracy: true }
+    );
   };
 
   const handleFormSubmit = async () => {
@@ -129,10 +179,19 @@ const WorkerDashboard = () => {
                     </div>
 
                     <h5 className="fw-bold mb-1">{task.type}</h5>
-                    <p className="text-muted small mb-3">Loc: {task.reporter?.landmark || "Standard Area"}</p>
+                    <p className="text-muted small mb-1">Loc: {task.reporter?.landmark || "Standard Area"}</p>
+
+                    {task.weatherContext && task.weatherContext.temp !== undefined && (
+                      <div className={`mt-2 mb-3 p-2 rounded d-flex align-items-center ${task.weatherContext.isHazardous ? 'bg-danger text-white' : 'bg-light text-dark'}`} style={{ fontSize: '0.75rem' }}>
+                        {task.weatherContext.isHazardous ? <AlertTriangle size={14} className="me-2" /> : <CloudRain size={14} className="me-2" />}
+                        <span className="fw-bold">
+                          {task.weatherContext.temp}°C - {task.weatherContext.condition?.toUpperCase()} 
+                          {task.weatherContext.isHazardous && " | HAZARD ALERT"}
+                        </span>
+                      </div>
+                    )}
 
                     <div className="d-grid gap-2">
-                      {/* VIEW MAP BUTTON */}
                       <Button 
                         variant="outline-secondary" 
                         size="sm" 
@@ -142,9 +201,6 @@ const WorkerDashboard = () => {
                         <MapPin size={14} className="me-2 text-danger"/> VIEW MISSION MAP
                       </Button>
 
-                      {/* WORKFLOW BUTTONS */}
-                      
-                      {/* STEP 1: START MISSION (For Assigned or Pending) */}
                       {(task.status === "Assigned" || task.status === "Pending") && (
                         <Button 
                           variant="primary" 
@@ -156,19 +212,22 @@ const WorkerDashboard = () => {
                         </Button>
                       )}
 
-                      {/* STEP 2: CONFIRM ARRIVAL (Only shows after mission started) */}
                       {task.status === "Accepted" && (
                         <Button 
                           variant="warning" 
                           size="sm" 
                           className="fw-bold shadow-sm"
-                          onClick={() => handleStatusChange(task._id, "Arrived")}
+                          disabled={isVerifying}
+                          onClick={() => handleArrivalVerification(task)}
                         >
-                          <Clock size={14} className="me-2"/> I HAVE ARRIVED AT SITE
+                          {isVerifying ? (
+                            <><Spinner size="sm" className="me-2"/> VERIFYING GPS...</>
+                          ) : (
+                            <><MapIcon size={14} className="me-2"/> VERIFY & MARK ARRIVAL</>
+                          )}
                         </Button>
                       )}
 
-                      {/* STEP 3: SUBMIT RESOLUTION (Only shows after arrival confirmed) */}
                       {task.status === "Arrived" && (
                         <Button 
                           variant="dark" 

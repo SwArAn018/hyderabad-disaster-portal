@@ -15,22 +15,37 @@ const ReportSchema = new mongoose.Schema({
     enum: ["Pending", "Assigned", "Accepted", "Arrived", "Submitted for Review", "Resolved"], 
     default: "Pending" 
   },
-  // NEW: Added reporter details to match the frontend 'reporter' object
   reporter: {
     name: { type: String, required: true },
     phone: { type: String, required: true },
     pincode: String,
     landmark: String
   },
-  // UPDATED: Structured to capture URLs and the dynamic 'details' from the form
   evidence: {
     img: String,
     vid: String,
-    categoryDetails: { type: mongoose.Schema.Types.Mixed } // Stores waterLevel, area, blockType, etc.
+    categoryDetails: { type: mongoose.Schema.Types.Mixed } 
   },
+  
+  weatherContext: {
+    temp: { type: Number },
+    condition: { type: String },
+    isHazardous: { type: Boolean, default: false },
+    fetchedAt: { type: Date, default: Date.now }
+  },
+
+  // --- NEW: ARRIVAL VERIFICATION & RESOLUTION TRACKING ---
+  arrivalTimestamp: { type: Date }, // Recorded when worker hits "Arrived"
+  verifiedLocation: {
+    lat: Number,
+    lng: Number,
+    distanceFromSite: Number // Meters away when they marked "Arrived"
+  },
+  // ------------------------------------------------------
+
   worker: { type: String, default: "Unassigned" },
   severity: { type: String, default: "Medium" },
-  timestamp: { type: Date, default: Date.now } // Using timestamp to match your frontend payload
+  timestamp: { type: Date, default: Date.now }
 });
 
 module.exports = mongoose.model('Report', ReportSchema);
