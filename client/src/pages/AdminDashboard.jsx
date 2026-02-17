@@ -99,7 +99,7 @@ const [loadingWeather, setLoadingWeather] = useState(false);
 const fetchWeatherGrid = async () => {
   setLoadingWeather(true);
   try {
-    const res = await fetch('http://localhost:5000/api/weather/overview');
+    const res = await fetch(`${API_BASE_URL}/api/weather/overview`);
     if (res.ok) {
       const data = await res.json();
       setWeatherGrid(data);
@@ -578,7 +578,6 @@ const fetchWeatherGrid = async () => {
                 </tbody>
               </Table>
 
-              <h6 className="fw-bold mt-3 small text-muted"><ImageIcon size={14} className="me-1"/> RESOLUTION EVIDENCE</h6>
               <h6 className="fw-bold mt-3 small text-muted"><ImageIcon size={14} className="me-1"/> RESOLUTION EVIDENCE</h6>
 <div className="p-3 border rounded bg-light mb-3 text-center">
   {selectedReport.evidence?.img ? (

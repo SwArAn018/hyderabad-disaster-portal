@@ -3,13 +3,14 @@ import { Container, Row, Col, Card, Form, Button, ToggleButtonGroup, ToggleButto
 import { ShieldCheck, User, HardHat, UserPlus, MapPin, Phone, Fingerprint } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 const Login = () => {
   const [role, setRole] = useState('citizen');
   const [credentials, setCredentials] = useState({ userid: '', password: '' });
   const [error, setError] = useState('');
   const [showReg, setShowReg] = useState(false);
   
-  // Detailed registration state
   const [regDetails, setRegDetails] = useState({
     name: '',
     phone: '',
@@ -37,7 +38,8 @@ const Login = () => {
     }
 
     try {
-      const response = await fetch('http://localhost:5000/api/login', {
+      // FIX 1: Changed /api/users to /api/login
+      const response = await fetch(`${API_BASE_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -66,7 +68,8 @@ const Login = () => {
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch('http://localhost:5000/api/users', {
+      // FIX 2: Changed localhost:5000 to ${API_BASE_URL}
+      const response = await fetch(`${API_BASE_URL}/api/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -97,7 +100,7 @@ const Login = () => {
             <div className="text-center mb-4">
               <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTuwiRlV2mzm9K3hYWUjwABLqDxD9L5gbrTkg&s" alt="TS Emblem" style={{ height: '80px' }} />
               <h4 className="mt-3 fw-bold text-dark">Government of Telangana</h4>
-              <p className="text-muted small text-uppercase fw-semibold">Disaster Response Management (A PROTOTYPE FOR HANDLING URBAN CIVIC ISSUES) </p>
+              <p className="text-muted small text-uppercase fw-semibold">Disaster Response Management (A PROTOTYPE) </p>
             </div>
 
             <Card className="shadow-lg border-0 rounded-4">
@@ -146,24 +149,23 @@ const Login = () => {
             </Card>
 
             <Button 
-  variant="danger" 
-  className="w-100 mt-3 d-flex align-items-center justify-content-center gap-2 py-3 fw-bold"
-  href="tel:+1234567890" // This triggers the phone dialer on mobile
->
-  <Phone size={20} /> CALL EMERGENCY DISPATCH
-</Button>
+              variant="danger" 
+              className="w-100 mt-3 d-flex align-items-center justify-content-center gap-2 py-3 fw-bold"
+              href="tel:+1234567890"
+            >
+              <Phone size={20} /> CALL EMERGENCY DISPATCH
+            </Button>
           </Col>
         </Row>
       </Container>
 
-      {/* DETAILED REGISTRATION MODAL */}
       <Modal show={showReg} onHide={() => setShowReg(false)} centered size="lg">
         <Modal.Header closeButton className="border-0">
           <Modal.Title className="fw-bold">Citizen Registration Form</Modal.Title>
         </Modal.Header>
         <Modal.Body className="px-4 pb-4">
           <Alert variant="info" className="small">
-            Ensure your details match your Government ID for faster disaster relief assistance.
+            Ensure your details match your Government ID for faster assistance.
           </Alert>
           <Form onSubmit={handleRegisterSubmit}>
             <Row>

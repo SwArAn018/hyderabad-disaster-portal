@@ -2,14 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { Container, Card, Button, Badge, Modal, Form, InputGroup, Spinner, Row, Col } from 'react-bootstrap';
 import AppNavbar from '../components/Navbar';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { ClipboardList, Send, Image as ImageIcon, ShieldCheck, Users, MapPin, Navigation, Clock, CloudRain, AlertTriangle, Map as MapIcon } from 'lucide-react';
+import { ClipboardList, Send, Image as ImageIcon, ShieldCheck, Users, MapPin, Navigation, CloudRain, AlertTriangle, Map as MapIcon } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
 // Leaflet Icon Fix
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-let DefaultIcon = L.icon({ iconUrl: markerIcon, shadowUrl: markerShadow, iconSize: [25, 41], iconAnchor: [12, 41] });
+
+// Dynamically handle the API URL for Render
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+let DefaultIcon = L.icon({ 
+  iconUrl: markerIcon, 
+  shadowUrl: markerShadow, 
+  iconSize: [25, 41], 
+  iconAnchor: [12, 41] 
+});
 L.Marker.prototype.options.icon = DefaultIcon;
 
 const WorkerDashboard = () => {
@@ -19,7 +28,7 @@ const WorkerDashboard = () => {
   const [activeTask, setActiveTask] = useState(null); 
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [evidence, setEvidence] = useState({ imageUrl: '', videoUrl: '', notes: '' });
-  const [isVerifying, setIsVerifying] = useState(false); // NEW: Track GPS verification status
+  const [isVerifying, setIsVerifying] = useState(false);
   
   const getWorkerName = () => {
     const directTeam = localStorage.getItem('userTeam');
@@ -33,7 +42,6 @@ const WorkerDashboard = () => {
 
   const workerTeam = getWorkerName();
 
-  // --- NEW: Haversine Formula to calculate distance in meters ---
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371e3; // Earth radius in meters
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -47,7 +55,7 @@ const WorkerDashboard = () => {
 
   const fetchTasks = async () => {
     try {
-      const response = await fetch('http://localhost:5000/api/reports');
+      const response = await fetch(`${API_BASE_URL}/api/reports`);
       const data = await response.json();
       const myTasks = data.filter(r => r.worker === workerTeam && r.status !== "Resolved");
       setTasks(myTasks.reverse());
@@ -60,10 +68,9 @@ const WorkerDashboard = () => {
     return () => clearInterval(interval);
   }, [workerTeam]);
 
-  // Updated to accept extraData (like verifiedLocation)
   const handleStatusChange = async (id, newStatus, extraData = {}) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/reports/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/reports/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus, ...extraData }),
@@ -72,7 +79,6 @@ const WorkerDashboard = () => {
     } catch (err) { alert("Failed to update status."); }
   };
 
-  // --- NEW: Geofence Verification Logic ---
   const handleArrivalVerification = (task) => {
     if (!navigator.geolocation) return alert("Geolocation is not supported by your browser.");
 
@@ -84,13 +90,12 @@ const WorkerDashboard = () => {
         const [targetLat, targetLng] = task.loc;
 
         const distance = calculateDistance(workerLat, workerLng, targetLat, targetLng);
-        const MAX_DISTANCE = 200; // 200 meters geofence
+        const MAX_DISTANCE = 200; 
 
         if (distance > MAX_DISTANCE) {
           alert(`Verification Failed! You are ${Math.round(distance)}m away. You must be within 200m to mark arrival.`);
           setIsVerifying(false);
         } else {
-          // Success: Pass verified location to backend
           await handleStatusChange(task._id, "Arrived", {
             verifiedLocation: {
               lat: workerLat,
@@ -113,7 +118,7 @@ const WorkerDashboard = () => {
     if(!evidence.notes) return alert("Please add resolution notes.");
     try {
       const currentReport = tasks.find(t => t._id === activeTaskId);
-      const response = await fetch(`http://localhost:5000/api/reports/${activeTaskId}`, {
+      const response = await fetch(`${API_BASE_URL}/api/reports/${activeTaskId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -136,9 +141,10 @@ const WorkerDashboard = () => {
   };
 
   const openNavigation = (loc) => {
-    const url = `https://www.google.com/search?q=https://www.google.com/maps%3Fq%3D${loc[0]},${loc[1]}`;
-    window.open(url, '_blank');
-  };
+  // Corrected Google Maps URL format
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${loc[0]},${loc[1]}`;
+  window.open(url, '_blank');
+};
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f4f4f4' }}>
