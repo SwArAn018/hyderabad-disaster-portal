@@ -1,4 +1,5 @@
-require('dotenv').config();
+require('dotenv').config(); // Change this from 'import' to 'require'
+console.log("Checking DB URL:", process.env.MONGO_URI ? "Found ✅" : "Missing ❌");
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -16,7 +17,7 @@ const { getWeatherData } = require('./utils/weather');
 const app = express();
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:5173', // Your frontend address
+  origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
@@ -30,11 +31,11 @@ setInterval(() => {
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
     console.log("✅ Connected to MongoDB Atlas");
-    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
   })
   .catch(err => {
     console.error("❌ Connection Error:", err);
   });
+
 // --- USER & AUTH ROUTES ---
 
 app.post('/api/users', async (req, res) => {
