@@ -28,9 +28,13 @@ setInterval(() => {
 }, 1800000); // 30 minutes
 
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Connected to MongoDB Atlas"))
-  .catch(err => console.error("❌ Connection Error:", err));
-
+  .then(() => {
+    console.log("✅ Connected to MongoDB Atlas");
+    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+  })
+  .catch(err => {
+    console.error("❌ Connection Error:", err);
+  });
 // --- USER & AUTH ROUTES ---
 
 app.post('/api/users', async (req, res) => {
