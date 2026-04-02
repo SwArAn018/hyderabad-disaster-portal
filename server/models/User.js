@@ -12,16 +12,28 @@ const UserSchema = new mongoose.Schema({
     },
     role: { 
         type: String, 
-        enum: ['admin', 'worker', 'citizen'], // Added 'citizen'
-        default: 'citizen' // Changed default to citizen
+        enum: ['admin', 'worker', 'citizen'], 
+        default: 'citizen' 
+    },
+    // Aadhaar is CRITICAL for your server.js duplicate check
+    aadhaar: { 
+        type: String, 
+        sparse: true, 
+        unique: true // Ensures one account per citizen
     },
     dept: { 
         type: String, 
-        required: function() { return this.role !== 'citizen'; } // Only required for workers/admins
+        required: function() { return this.role !== 'citizen'; } 
     },
     phone: { 
         type: String, 
-        required: true 
+        required: true,
+        unique: true // Prevents multiple accounts with same phone
+    },
+    // --- WORKER STATUS TRACKING ---
+    isAvailable: { 
+        type: Boolean, 
+        default: true 
     },
     createdAt: { 
         type: Date, 

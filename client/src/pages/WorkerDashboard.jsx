@@ -79,7 +79,7 @@ const WorkerDashboard = () => {
     } catch (err) { alert("Failed to update status."); }
   };
 
-  const handleArrivalVerification = (task) => {
+const handleArrivalVerification = (task) => {
     if (!navigator.geolocation) return alert("Geolocation is not supported by your browser.");
 
     setIsVerifying(true);
@@ -96,12 +96,12 @@ const WorkerDashboard = () => {
           alert(`Verification Failed! You are ${Math.round(distance)}m away. You must be within 200m to mark arrival.`);
           setIsVerifying(false);
         } else {
+          // --- AI AUDIT UPGRADE ---
+          // Sending clientTimestamp for the Server-Side Integrity Check
           await handleStatusChange(task._id, "Arrived", {
-            verifiedLocation: {
-              lat: workerLat,
-              lng: workerLng,
-              distanceFromSite: Math.round(distance)
-            }
+            workerLat: workerLat,
+            workerLon: workerLng,
+            clientTimestamp: new Date().toISOString() // This is the "Truth" check
           });
           setIsVerifying(false);
         }

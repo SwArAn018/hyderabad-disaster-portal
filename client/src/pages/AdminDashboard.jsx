@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Badge, Table, Button, Form, ListGroup, Dropdown, Modal, InputGroup } from 'react-bootstrap';
+import { Container, Row, Col, Card, Badge, Table, Button, Form, ListGroup, Dropdown, Modal, InputGroup, OverlayTrigger, Tooltip} from 'react-bootstrap';
 import AppNavbar from '../components/Navbar';
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents, Rectangle } from 'react-leaflet';
 import { CheckCircle, Eye, UserPlus, Inbox, Activity, ShieldAlert, Video, MapPin, PhoneCall, ImageIcon, FileText, CloudSun, AlertTriangle, Clock, Map as MapIcon } from 'lucide-react';
@@ -71,6 +71,7 @@ const LocationPicker = ({ setManualData, manualData }) => {
 
 const AdminDashboard = () => {
   const [reports, setReports] = useState([]);
+  const [alerts, setAlerts] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [mapCenter, setMapCenter] = useState([17.3850, 78.4867]);
   
@@ -100,13 +101,19 @@ const fetchWeatherGrid = async () => {
   setLoadingWeather(true);
   try {
     const res = await fetch(`${API_BASE_URL}/api/weather/overview`);
-    if (res.ok) {
-      const data = await res.json();
-      setWeatherGrid(data);
-      setShowWeatherModal(true); // Open the view once data is ready
+    
+    // IF SERVER RETURNS 500, THIS CATCHES IT
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.message || `Server Error: ${res.status}`);
     }
+
+    const data = await res.json();
+    setWeatherGrid(data);
+    setShowWeatherModal(true);
   } catch (err) {
-    console.error("Failed to fetch weather grid:", err);
+    console.error("Weather Fetch Failed:", err);
+    alert(`🚨 WEB SERVER ERROR: ${err.message}`); 
   } finally {
     setLoadingWeather(false);
   }
@@ -120,6 +127,9 @@ const fetchWeatherGrid = async () => {
       const workerRes = await fetch(`${API_BASE_URL}/api/users/workers`);
       const workerData = await workerRes.json();
       setWorkers(workerData);
+      const alertRes = await fetch(`${API_BASE_URL}/api/alerts`);
+      const alertData = await alertRes.json();
+      setAlerts(alertData);
     } catch (err) { console.error("Data load failed:", err); }
   };
 
@@ -236,6 +246,27 @@ const fetchWeatherGrid = async () => {
       <AppNavbar roleName="OFFICIAL ADMIN" />
       
       <Container fluid className="p-4">
+        {/* 👇 LIVE PROACTIVE ALERTS BOX */}
+        {alerts.length > 0 && (
+          <Row className="mb-3">
+            <Col>
+              <div className="alert alert-warning border-warning shadow-sm mb-0 p-3 d-flex align-items-center gap-3">
+                <AlertTriangle size={24} className="text-danger flex-shrink-0" />
+                <div className="flex-grow-1">
+                  <div className="fw-bold text-danger">⚠️ PROACTIVE SENSOR ALERTS:</div>
+                  <div className="text-dark small">
+                    {alerts.map((alert, index) => (
+                      <span key={alert._id || index} className="me-3">
+                        <strong>[{alert.areaName || 'Citywide'}]</strong> {alert.title} - {alert.message}
+                        {index < alerts.length - 1 ? ' | ' : ''}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Col>
+          </Row>
+        )}
         <Row className="mb-4 g-3 text-center">
           <Col md={3}><Card className="bg-warning text-dark border-0 shadow-sm"><Card.Body className="fw-bold">NEW: {stats.new}</Card.Body></Card></Col>
           <Col md={3}><Card className="bg-primary text-white border-0 shadow-sm"><Card.Body className="fw-bold">IN FIELD: {stats.inProgress}</Card.Body></Card></Col>
@@ -480,12 +511,44 @@ const fetchWeatherGrid = async () => {
                 {zone.condition?.toUpperCase()}
               </Badge>
 
-              <div className="mt-2 pt-2 border-top d-flex justify-content-center align-items-center">
-                <div className={`fw-bold small ${zone.incidentCount > 0 ? 'text-danger' : 'text-muted'}`}>
-                   <AlertTriangle size={14} className="me-1"/> 
-                   {zone.incidentCount} ACTIVE INCIDENTS
+              {/* 👇 THIS IS THE NEW AQI BADGE WE ARE ADDING */}
+              {(zone.aqi || zone.aqiData?.aqi) && (
+  <OverlayTrigger
+    placement="top"
+    overlay={
+      <Tooltip id={`tooltip-aqi-${idx}`}>
+        {(zone.aqi || zone.aqiData?.aqi) >= (zone.zoneType === "Residential" ? 3 : 4)
+          ? `Threshold breached for ${zone.zoneType || 'Residential'} Zone`
+          : `Air quality within safe limits for ${zone.zoneType || 'Residential'} Zone`}
+      </Tooltip>
+    }
+  >
+    <Badge 
+      bg={(zone.aqi || zone.aqiData?.aqi) >= (zone.zoneType === "Residential" ? 3 : 4) ? "danger" : "info"} 
+      className="px-3 py-2"
+      style={{ cursor: 'pointer' }}
+    >
+      AQI: {zone.aqi || zone.aqiData?.aqi}
+    </Badge>
+  </OverlayTrigger>
+)}
+
+              {/* ⚠️ NEW: COMPOUND HAZARDS ALERT BANNER */}
+              {zone.compoundHazards && zone.compoundHazards.length > 0 && (
+                <div className="mt-2 p-2 bg-danger-subtle text-danger rounded border border-danger border-opacity-25 text-start">
+                  {zone.compoundHazards.map((hazard, hIdx) => (
+                    <div key={hIdx} className="mb-1 last-mb-0">
+                      <div className="fw-bold small d-flex align-items-center">
+                        <ShieldAlert size={12} className="me-1" />
+                        {hazard.type} Detected!
+                      </div>
+                      <div className="text-muted" style={{ fontSize: '0.7rem' }}>
+                        {hazard.instruction}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              )}
             </Card.Body>
           </Card>
         </Col>
@@ -496,6 +559,8 @@ const fetchWeatherGrid = async () => {
     </div>
   </Modal.Body>
 </Modal>
+
+
 
 
       {/* AUDIT MODAL WITH WORKER VERIFICATION */}
@@ -530,6 +595,35 @@ const fetchWeatherGrid = async () => {
                   )}
                 </Card>
               )}
+              {/* --- AI RELIABILITY SCORE BAR --- */}
+{selectedReport.reliabilityScore !== undefined && (
+  <Card className="mb-3 border-0 shadow-sm bg-dark text-white overflow-hidden">
+    <Card.Body className="p-3">
+      <div className="d-flex justify-content-between align-items-center mb-2">
+        <small className="fw-bold text-uppercase tracking-wider">
+          <ShieldAlert size={14} className="me-2 text-info"/> Springer-V2 Trust Score
+        </small>
+        <Badge bg={selectedReport.reliabilityScore > 75 ? "success" : "warning"}>
+          {selectedReport.reliabilityScore}% Match
+        </Badge>
+      </div>
+      <div style={{ height: '8px', backgroundColor: 'rgba(255,255,255,0.1)', borderRadius: '10px' }}>
+        <div 
+          style={{ 
+            width: `${selectedReport.reliabilityScore}%`, 
+            height: '100%', 
+            backgroundColor: selectedReport.reliabilityScore > 75 ? '#28a745' : '#ffc107',
+            borderRadius: '10px',
+            transition: 'width 1.5s ease-in-out'
+          }} 
+        />
+      </div>
+      <p className="mt-2 mb-0" style={{ fontSize: '0.75rem', color: '#adb5bd' }}>
+        <strong>AI Analysis:</strong> {selectedReport.trustReason || "Contextual validation complete."}
+      </p>
+    </Card.Body>
+  </Card>
+)}
 
               {selectedReport.worker && (
                 <Card className="mb-3 border-start border-4 border-primary shadow-sm">
@@ -552,7 +646,7 @@ const fetchWeatherGrid = async () => {
                           <MapIcon size={16} className="text-muted mb-1"/>
                           <div className="small fw-bold">GPS VERIFICATION</div>
                           <div className="fw-bold">
-                            {selectedReport.verifiedLocation ? `${selectedReport.verifiedLocation.distanceFromSite}m from site` : "Awaiting Geofence"}
+                            {selectedReport.verifiedLocation ? `${selectedReport.verifiedLocation.distanceFromSite} from site` : "Awaiting Geofence"}
                           </div>
                         </div>
                       </Col>

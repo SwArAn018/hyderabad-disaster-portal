@@ -6,14 +6,10 @@ const cors = require('cors');
 const Report = require('./models/Report');
 const User = require('./models/User');
 const Alert = require('./models/Alert');
-const { checkWeatherAndAlert } = require('./utils/weatherWatcher');
+const { getWeatherData, getAQIData, detectCompoundHazards } = require('./utils/weather');
 // Import the Weather Utility
-const { getWeatherData } = require('./utils/weather');
 
-// '0.0.0.0' is a special address that tells Render's network 
-// that the app is ready to accept external traffic.
-
-
+const { checkWeatherAndAlert } = require('./utils/weatherWatcher');
 const app = express();
 app.use(express.json());
 app.use(cors({
@@ -32,6 +28,16 @@ mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB Connected Successfully"))
 .catch(err => console.log("❌ Connection Error:", err));
 
+mongoose.connection.once('open', async () => {
+  try {
+    console.log("🛠️ Attempting to force create 2dsphere index...");
+    await mongoose.connection.db.collection('reports').createIndex({ loc: "2dsphere" });
+    console.log("✅ 2dsphere index verified/created successfully!");
+  } catch (err) {
+    console.error("❌ INDEX CREATION FAILED:", err.message);
+    console.log("💡 Tip: Check if any report has an invalid 'loc' format.");
+  }
+});
 // --- USER & AUTH ROUTES ---
 
 app.post('/api/users', async (req, res) => {
@@ -95,47 +101,140 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
+// --- REPLACE THIS BLOCK ---
 app.post('/api/reports', async (req, res) => {
   try {
-    const { loc } = req.body; 
+    const { loc, type } = req.body;
 
-    console.log("📡 Fetching weather for coordinates:", loc);
+    // 1. SENSING: Fetch Context (Weather & AQI)
+    // Note: Assuming you have getAQIData implemented to support PDF Algorithm 1
     const weather = await getWeatherData(loc[0], loc[1]);
+    const aqiData = typeof getAQIData === 'function' ? await getAQIData(loc[0], loc[1]) : { aqi: 0 };
 
+    // 2. PROCESSING: AI Reliability & Compound Hazard Logic
+    let trustScore = 70; // Baseline
+    let trustReason = "Standard environmental match";
+
+    // A. Check for Compound Hazards (PDF Algorithm 1)
+    // This checks for Dust Storms, Heat Stress, etc.
+    const calculatedHazards = detectCompoundHazards(weather, aqiData);
+    const compoundMatch = calculatedHazards.find(h => 
+      h.type.toLowerCase().includes(type.toLowerCase())
+    );
+
+    if (compoundMatch) {
+      trustScore = 100;
+      trustReason = `Validated by Compound Hazard Logic: ${compoundMatch.type}`;
+    } 
+    // B. Basic Weather Correlation (Springer/Validation Method)
+    else if (weather && weather.condition !== "Offline") {
+      const isRainy = ["Rain", "Thunderstorm", "Drizzle"].includes(weather.condition);
+      const isVeryHot = weather.temp > 40;
+      const isWindy = weather.windSpeed > 10;
+
+      if (type === "Flooding") {
+        if (isRainy) {
+          trustScore = 98;
+          trustReason = "High correlation with live precipitation data";
+        } else if (weather.condition === "Clear") {
+          trustScore = 35;
+          trustReason = "Weather discrepancy: Flooding reported during clear skies";
+        }
+      } else if ((type === "Blocked Road" || type === "Infrastructure") && isWindy) {
+        trustScore = 90;
+        trustReason = "Validated by high wind speed sensors";
+      } else if (type === "Heat Wave" && isVeryHot) {
+        trustScore = 95;
+        trustReason = "Confirmed by thermal sensors";
+      }
+    }
+
+    // 3. RESPONDING: Construct object with AI Metadata
     const reportData = {
       ...req.body,
-      weatherContext: weather || { temp: 0, condition: "Unknown", isHazardous: false } 
+      // Auto-escalate severity if trust is very high or weather is hazardous
+      severity: (weather?.isHazardous || trustScore > 90) ? "High" : (req.body.severity || "Medium"),
+      reliabilityScore: trustScore,
+      trustReason: trustReason,
+      weatherContext: {
+        ...weather,
+        aqiSnapshot: aqiData.aqi // Snapshots the AQI at the time of report
+      }
     };
-
-    if (weather?.isHazardous && req.body.type === "Flooding") {
-      console.log("⚠️ Hazard detected! Boosting severity to High.");
-      reportData.severity = "High";
-    }
 
     const newReport = new Report(reportData);
     await newReport.save();
-    
-    console.log("🚀 Report saved successfully!");
+
+    console.log(`🚀 AI Report: ${type} | Trust: ${trustScore}% | ${trustReason}`);
     res.status(201).json(newReport);
+
   } catch (err) {
     console.error("Report Save Error:", err);
-    res.status(400).json({ message: "Failed to submit report: " + err.message });
+    res.status(400).json({ message: "Failed: " + err.message });
   }
 });
 
 app.put('/api/reports/:id', async (req, res) => {
   try {
-    const updatePayload = { ...req.body };
+    const report = await Report.findById(req.params.id);
+    if (!report) return res.status(404).json({ message: "Report not found" });
 
+    let updateData = { ...req.body };
+
+    // --- ENHANCED ARRIVAL LOGIC ---
     if (req.body.status === "Arrived") {
-      updatePayload.arrivalTimestamp = new Date();
-      console.log(`📍 Verification: Worker arrived at site for report ${req.params.id}`);
+      const serverTime = new Date(); // The "True" time on the server
+      const clientTime = new Date(); // The time the report was marked
+      
+      updateData.arrivalTimestamp = clientTime;
+
+      // 1. --- TIMESTAMP INTEGRITY CHECK (New Feature) ---
+      // We check if the phone's reported time matches the server time within 5 minutes
+      if (req.body.clientTimestamp) {
+        const reportedTime = new Date(req.body.clientTimestamp);
+        // Calculate difference in minutes
+        const timeDiff = Math.abs(serverTime - reportedTime) / 1000 / 60;
+
+        if (timeDiff > 5) {
+          console.warn(`🕒 FRAUD ALERT: Timestamp Manipulation detected for report ${req.params.id}`);
+          // Add a flag to the database so the Admin knows
+          updateData.timeAuditStatus = "Flagged: Manual Time Change Detected";
+        } else {
+          updateData.timeAuditStatus = "Verified";
+        }
+      }
+
+      // 2. --- GEOSPATIAL AUDIT (Your Existing Logic) ---
+      if (report.loc && req.body.workerLat && req.body.workerLon) {
+        const distance = getDistanceFromLatLonInKm(
+          req.body.workerLat, 
+          req.body.workerLon, 
+          report.loc[0], 
+          report.loc[1] 
+        );
+
+        const isNear = distance <= 0.2; // 200 Meters
+        
+        updateData.verifiedLocation = {
+          lat: req.body.workerLat,
+          lng: req.body.workerLon,
+          distanceFromSite: Math.round(distance * 1000),
+          verificationStatus: isNear ? "Verified" : "Flagged"
+        };
+
+        console.log(`📍 Audit: Worker is ${Math.round(distance * 1000)}m from site. Status: ${isNear ? "✅" : "❌"}`);
+      }
     }
 
-    const updated = await Report.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
-    res.json(updated);
+    const updatedReport = await Report.findByIdAndUpdate(
+      req.params.id, 
+      updateData, 
+      { new: true }
+    );
+    
+    res.json(updatedReport);
   } catch (err) {
-    res.status(400).json({ message: err.message });
+    res.status(400).json({ message: "Update failed: " + err.message });
   }
 });
 
@@ -200,8 +299,8 @@ app.get('/api/weather/overview', async (req, res) => {
 
   try {
     const overview = await Promise.all(zones.map(async (zone) => {
-      // Pass the zoneType to the utility for Differentiated AQI logic
-      const weather = await getWeatherData(zone.lat, zone.lon, zone.zoneType);
+      // Fetch live weather using your existing utility
+      const weather = await getWeatherData(zone.lat, zone.lon);
       
       // Count active incidents specifically for this zone's area
       const incidents = await Report.countDocuments({
@@ -215,7 +314,9 @@ app.get('/api/weather/overview', async (req, res) => {
         temp: weather?.temp || 0,
         condition: weather?.condition || "Clear",
         isHazardous: weather?.isHazardous || false,
-        incidentCount: incidents 
+        incidentCount: incidents,
+        aqiData: { aqi: weather?.aqiData ? weather.aqiData.aqi : "N/A" },
+        zoneType: zone.zoneType || "Residential" 
       };
     }));
     res.json(overview);
@@ -224,11 +325,20 @@ app.get('/api/weather/overview', async (req, res) => {
     res.status(500).json({ message: "Overview fetch failed" });
   }
 });
+// --- GEOSPATIAL MATH HELPER ---
+function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a = 
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) * Math.cos(deg2rad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+  return R * c; 
+}
 
+function deg2rad(deg) {
+  return deg * (Math.PI / 180);
+}
 const PORT = process.env.PORT || 5000;
-
-// '0.0.0.0' is a special address that tells Render's network 
-// that the app is ready to accept external traffic.
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server is running and listening on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

@@ -4,11 +4,12 @@ const ReportSchema = new mongoose.Schema({
   type: { 
     type: String, 
     required: true,
-    enum: ["Flooding", "Blocked Road", "Garbage", "Power Outage", "Other"] 
+    enum: ["Flooding", "Blocked Road", "Garbage", "Power Outage", "Heat Wave", "Other"] 
   },
   loc: {
-    type: [Number], // [lat, lng]
-    required: true
+    type: [Number], // [longitude, latitude] 
+    required: true,
+    index: '2dsphere' // CRITICAL: Required for the $near query in your Weather Grid
   },
   status: { 
     type: String, 
@@ -21,6 +22,11 @@ const ReportSchema = new mongoose.Schema({
     pincode: String,
     landmark: String
   },
+  
+  // --- AI RELIABILITY & AUDIT FIELDS ---
+  reliabilityScore: { type: Number, default: 70 }, 
+  trustReason: { type: String, default: "Standard Report" }, 
+  
   evidence: {
     img: String,
     vid: String,
@@ -34,14 +40,14 @@ const ReportSchema = new mongoose.Schema({
     fetchedAt: { type: Date, default: Date.now }
   },
 
-  // --- NEW: ARRIVAL VERIFICATION & RESOLUTION TRACKING ---
-  arrivalTimestamp: { type: Date }, // Recorded when worker hits "Arrived"
+  // --- WORKER VERIFICATION & RESOLUTION ---
+  arrivalTimestamp: { type: Date }, 
   verifiedLocation: {
     lat: Number,
     lng: Number,
-    distanceFromSite: Number // Meters away when they marked "Arrived"
+    distanceFromSite: Number, // Meters away from site
+    verificationStatus: { type: String, default: "Pending" } // "Verified" or "Flagged"
   },
-  // ------------------------------------------------------
 
   worker: { type: String, default: "Unassigned" },
   severity: { type: String, default: "Medium" },

@@ -1,77 +1,137 @@
 const axios = require('axios');
 
 /**
- * Fetches live weather and AQI data for a given set of coordinates.
+ * Fetches live weather AND AQI data for a given set of coordinates.
  * @param {number} lat - Latitude
  * @param {number} lon - Longitude
- * @param {string} zoneType - "Industrial", "Residential", etc.
  */
-const getWeatherData = async (lat, lon, zoneType = "Residential") => {
+const getWeatherData = async (lat, lon) => {
   const API_KEY = process.env.OPENWEATHER_API_KEY;
-  
-  // URL 1: Current Weather
-  const weatherUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`;
-  
-  // URL 2: Air Pollution (AQI)
-  const pollutionUrl = `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${API_KEY}`;
+  const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${API_KEY}&units=metric`;
 
   try {
-    // Fetch both datasets simultaneously for efficiency
-    const [weatherRes, pollutionRes] = await Promise.all([
-      axios.get(weatherUrl),
-      axios.get(pollutionUrl)
-    ]);
-
-    const wData = weatherRes.data;
-    const pData = pollutionRes.data.list[0]; // Get the first result from pollution list
-
-    const mainCondition = wData.weather[0].main;
-    const temp = wData.main.temp;
-    const windSpeed = wData.wind.speed;
-    const pm25 = pData.components.pm2_5; // PM2.5 levels
-    const so2 = pData.components.so2;     // SO2 levels (Critical for Industrial)
-
-    // 1. Weather Hazard Thresholds (Standard for all zones)
-    const hazardousConditions = ["Rain", "Thunderstorm", "Tornado", "Squall", "Dust"];
-    const isWeatherHazard = hazardousConditions.includes(mainCondition) || temp > 42 || windSpeed > 15;
-
-    // 2. Zone-Differentiated AQI Thresholds (As per Table 1 in the Research Paper)
-    let isAQIHazard = false;
-    if (zoneType === "Industrial") {
-      // Lenient thresholds for industrial corridors to avoid alert fatigue
-      // High SO2 (>150) or Extreme PM2.5 (>250)
-      if (so2 > 150 || pm25 > 250) isAQIHazard = true;
-    } else {
-      // Stricter thresholds for Residential/Commercial areas
-      // Standard CPCB/Residential PM2.5 limit (>60)
-      if (pm25 > 60 || so2 > 40) isAQIHazard = true;
-    }
-
-    // 3. Compound Hazard Logic (The "Scientific" Contribution)
-    // If it's a hazard due to weather OR air quality, flag as hazardous
-    const isHazardous = isWeatherHazard || isAQIHazard;
-
-    return {
+    const response = await axios.get(url);
+    const data = response.data;
+    const mainCondition = data.weather[0].main;
+    const temp = data.main.temp;
+    const windSpeed = data.wind.speed; // km/h equivalent if units=metric
+    
+    // Categorize hazardous conditions based on Hyderabad's disaster profiles
+    const hazardousConditions = ["Rain", "Thunderstorm", "Tornado", "Squall", "Dust", "Haze", "Drizzle"];
+    
+    // Logic to flag:
+    // 1. Extreme Heat (Heatwave) > 42°C
+    // 2. High Winds > 15 m/s (leads to uprooted trees/blocked roads)
+    // 3. Active Precipitation (Flooding risk)
+    const isExtremeWeather = 
+      hazardousConditions.includes(mainCondition) || 
+      temp > 42 || 
+      windSpeed > 15;
+    
+    const weatherResult = {
       temp: Math.round(temp),
       condition: mainCondition,
-      description: wData.weather[0].description,
-      humidity: wData.main.humidity,
+      description: data.weather[0].description,
+      humidity: data.main.humidity,
       windSpeed: windSpeed,
-      pm25: pm25.toFixed(1),
-      so2: so2.toFixed(1),
-      zoneType: zoneType, // Returning this so frontend knows the context
-      isHazardous: isHazardous
+      isHazardous: isExtremeWeather
     };
+
+    // 👇 NEW: Fetch the AQI data for these coordinates
+    const aqiData = await getAQIData(lat, lon);
+
+    // 👇 NEW: Run the compound hazards engine now that we have both!
+    const compoundHazards = detectCompoundHazards(weatherResult, aqiData);
+
+    // Return everything mapped together in a single object
+    return {
+      ...weatherResult,
+      aqiData: aqiData, // 👈 Frontend will look here for zone.aqiData.aqi
+      aqi: aqiData.aqi, // 👈 Fallback direct mapping just in case
+      compoundHazards: compoundHazards
+    };
+
   } catch (error) {
-    console.error("Multi-Hazard API Error:", error.message);
+    console.error("Weather API Error:", error.message);
+    // Return a structured fallback so the Grid doesn't break
     return { 
       temp: "--", 
       condition: "Offline", 
       description: "Service unavailable", 
       humidity: 0,
-      isHazardous: false 
+      isHazardous: false,
+      aqi: "N/A", // 👈 Added fallback so it renders gracefully
+      aqiData: { aqi: "N/A" },
+      compoundHazards: [] // Fallback empty so React won't crash on map()
     };
   }
 };
 
-module.exports = { getWeatherData };
+/**
+ * ECOGUARD COMPOUND HAZARD ENGINE
+ * Based on Algorithm 1: Multi-Sensor Correlation
+ */
+const detectCompoundHazards = (weather, aqiData) => {
+  const hazards = [];
+  
+  // 1. Pre-Monsoon Dust Storm (Hyderabad Specific)
+  // Logic: High Wind + High PM10
+  if (weather.windSpeed > 15 && aqiData.pm10 > 300) {
+    hazards.push({
+      type: "Dust Storm",
+      severity: "High",
+      instruction: "Visibility low. Advice: Seal industrial ventilation in Patancheru."
+    });
+  }
+
+  // 2. Wet-Bulb Heat Stress (Health Risk)
+  // Logic: High Temp + High Humidity (Mentioned in PDF page 1)
+  if (weather.temp > 40 && weather.humidity > 60) {
+    hazards.push({
+      type: "Extreme Heat Stress",
+      severity: "Critical",
+      instruction: "High humidity prevents sweat cooling. Urgent health risk."
+    });
+  }
+
+  // 3. Photochemical Smog (HITEC City Profile)
+  // Logic: Clear Skies (High UV) + High NO2/O3
+  if (weather.condition === "Clear" && aqiData.no2 > 80) {
+    hazards.push({
+      type: "Photochemical Smog",
+      severity: "Medium",
+      instruction: "Secondary pollutant formation active in high-traffic zones."
+    });
+  }
+
+  return hazards;
+};
+
+/**
+ * Fetches live Air Pollution data for a given set of coordinates.
+ * Powered by OpenWeatherMap Air Pollution API
+ */
+const getAQIData = async (lat, lon) => {
+  const API_KEY = process.env.OPENWEATHER_API_KEY;
+  const url = `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${API_KEY}`;
+
+  try {
+    const response = await axios.get(url);
+    const data = response.data.list[0];
+    
+    return {
+      aqi: data.main.aqi, // Basic scale 1 to 5
+      pm10: data.components.pm10,
+      pm2_5: data.components.pm2_5,
+      no2: data.components.no2,
+      nh3: data.components.nh3,
+      so2: data.components.so2
+    };
+  } catch (error) {
+    console.error("AQI API Error:", error.message);
+    // Fallback so the math doesn't crash if the API fails
+    return { aqi: 0, pm10: 0, pm2_5: 0, no2: 0, nh3: 0, so2: 0 };
+  }
+};
+
+module.exports = { getWeatherData, getAQIData, detectCompoundHazards };
