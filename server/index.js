@@ -22,7 +22,7 @@ app.use(cors({
 checkWeatherAndAlert();
 setInterval(() => {
   checkWeatherAndAlert();
-}, 1800000); // 30 minutes
+}, 900000); // 30 minutes
 
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB Connected Successfully"))
@@ -188,8 +188,7 @@ app.put('/api/reports/:id', async (req, res) => {
       
       updateData.arrivalTimestamp = clientTime;
 
-      // 1. --- TIMESTAMP INTEGRITY CHECK (New Feature) ---
-      // We check if the phone's reported time matches the server time within 5 minutes
+      // 1. --- TIMESTAMP INTEGRITY CHECK ---
       if (req.body.clientTimestamp) {
         const reportedTime = new Date(req.body.clientTimestamp);
         // Calculate difference in minutes
@@ -204,7 +203,7 @@ app.put('/api/reports/:id', async (req, res) => {
         }
       }
 
-      // 2. --- GEOSPATIAL AUDIT (Your Existing Logic) ---
+      // 2. --- GEOSPATIAL AUDIT (The Haversine Check) ---
       if (report.loc && req.body.workerLat && req.body.workerLon) {
         const distance = getDistanceFromLatLonInKm(
           req.body.workerLat, 
@@ -223,6 +222,13 @@ app.put('/api/reports/:id', async (req, res) => {
         };
 
         console.log(`📍 Audit: Worker is ${Math.round(distance * 1000)}m from site. Status: ${isNear ? "✅" : "❌"}`);
+      } 
+      // 👇 NEW FALLBACK: Handle cases where phone GPS is turned off
+      else {
+        updateData.verifiedLocation = {
+          verificationStatus: "Flagged: Missing Worker GPS Data"
+        };
+        console.warn(`📍 Audit Failed: Report ${req.params.id} marked as arrived without worker coordinates.`);
       }
     }
 
@@ -234,6 +240,7 @@ app.put('/api/reports/:id', async (req, res) => {
     
     res.json(updatedReport);
   } catch (err) {
+    console.error("Update Error:", err);
     res.status(400).json({ message: "Update failed: " + err.message });
   }
 });
@@ -300,8 +307,7 @@ app.get('/api/weather/overview', async (req, res) => {
   try {
     const overview = await Promise.all(zones.map(async (zone) => {
       // Fetch live weather using your existing utility
-      const weather = await getWeatherData(zone.lat, zone.lon);
-      
+      const weather = await getWeatherData(zone.lat, zone.lon, zone.zoneType, zone.areaName);      
       // Count active incidents specifically for this zone's area
       const incidents = await Report.countDocuments({
         status: { $ne: "Resolved" },
