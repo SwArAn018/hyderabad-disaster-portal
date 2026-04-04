@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Card, Button, Badge, Modal, Form, InputGroup, Spinner, Row, Col } from 'react-bootstrap';
 import AppNavbar from '../components/Navbar';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
-import { ClipboardList, Send, Image as ImageIcon, ShieldCheck, Users, MapPin, Navigation, CloudRain, AlertTriangle, Map as MapIcon } from 'lucide-react';
+import { ClipboardList, Send, ShieldCheck, Users, MapPin, Navigation, CloudRain, AlertTriangle, Map as MapIcon, Link as LinkIcon } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 
@@ -27,15 +27,22 @@ const WorkerDashboard = () => {
   const [showMapModal, setShowMapModal] = useState(false); 
   const [activeTask, setActiveTask] = useState(null); 
   const [activeTaskId, setActiveTaskId] = useState(null);
-  const [evidence, setEvidence] = useState({ imageUrl: '', videoUrl: '', notes: '' });
   const [isVerifying, setIsVerifying] = useState(false);
+  
+  // NEW: Loading state to prevent duplicate clicks and hanging
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [url, setUrl] = useState('');
+  const [notes, setNotes] = useState('');
   
   const getWorkerName = () => {
     const directTeam = localStorage.getItem('userTeam');
     if (directTeam) return directTeam;
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
-      try { return JSON.parse(storedUser).name; } catch (e) { return "Unassigned"; }
+      try { 
+        return JSON.parse(storedUser).dept || "Unassigned"; 
+      } catch (e) { return "Unassigned"; }
     }
     return "Unassigned";
   };
@@ -79,7 +86,7 @@ const WorkerDashboard = () => {
     } catch (err) { alert("Failed to update status."); }
   };
 
-const handleArrivalVerification = (task) => {
+  const handleArrivalVerification = (task) => {
     if (!navigator.geolocation) return alert("Geolocation is not supported by your browser.");
 
     setIsVerifying(true);
@@ -96,12 +103,10 @@ const handleArrivalVerification = (task) => {
           alert(`Verification Failed! You are ${Math.round(distance)}m away. You must be within 200m to mark arrival.`);
           setIsVerifying(false);
         } else {
-          // --- AI AUDIT UPGRADE ---
-          // Sending clientTimestamp for the Server-Side Integrity Check
           await handleStatusChange(task._id, "Arrived", {
             workerLat: workerLat,
             workerLon: workerLng,
-            clientTimestamp: new Date().toISOString() // This is the "Truth" check
+            clientTimestamp: new Date().toISOString()
           });
           setIsVerifying(false);
         }
@@ -115,36 +120,53 @@ const handleArrivalVerification = (task) => {
   };
 
   const handleFormSubmit = async () => {
-    if(!evidence.notes) return alert("Please add resolution notes.");
+    if(!notes.trim()) return alert("Please add resolution notes.");
+    if(!url.trim()) return alert("Please add the resolution link.");
+
+    // Simple format check: must include a dot or start with http
+    const simpleUrlCheck = url.trim().includes('.') || url.trim().startsWith('http');
+    if(!simpleUrlCheck) {
+      return alert("Please enter a valid link format.");
+    }
+
+    // Set loading to true so button locks
+    setIsSubmitting(true);
+
     try {
-      const currentReport = tasks.find(t => t._id === activeTaskId);
       const response = await fetch(`${API_BASE_URL}/api/reports/${activeTaskId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
+        headers: {
+          'Content-Type': 'application/json' 
+        },
+        body: JSON.stringify({
           status: "Submitted for Review",
-          evidence: { 
-            ...currentReport.evidence, 
-            img: evidence.imageUrl, 
-            vid: evidence.videoUrl, 
-            notes: evidence.notes 
-          }
+          notes: notes.trim(),
+          "evidence.img": url.trim() 
         }),
       });
+
       if (response.ok) {
         setShowForm(false);
         setActiveTaskId(null);
-        setEvidence({ imageUrl: '', videoUrl: '', notes: '' });
+        setUrl('');
+        setNotes('');
         fetchTasks();
+      } else {
+        alert("Server returned an error. Failed to submit.");
       }
-    } catch (err) { alert("Submission failed."); }
+    } catch (err) { 
+      console.error("Resolution submit error:", err);
+      alert("Submission failed."); 
+    } finally {
+      // Re-enable button regardless of success or failure
+      setIsSubmitting(false);
+    }
   };
 
   const openNavigation = (loc) => {
-  // Standard Google Maps Direction URL
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${loc[0]},${loc[1]}`;
-  window.open(url, '_blank');
-};
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${loc[0]},${loc[1]}`;
+    window.open(url, '_blank');
+  };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f4f4f4' }}>
@@ -305,15 +327,36 @@ const handleArrivalVerification = (task) => {
           <Form>
             <Form.Group className="mb-3">
               <Form.Label className="small fw-bold">FIELD NOTES</Form.Label>
-              <Form.Control as="textarea" rows={3} placeholder="Describe the action taken..." value={evidence.notes} onChange={(e) => setEvidence({...evidence, notes: e.target.value})} />
+              <Form.Control as="textarea" rows={3} placeholder="Describe the action taken..." value={notes} onChange={(e) => setNotes(e.target.value)} />
             </Form.Group>
-            <Form.Label className="small fw-bold">PROOF OF WORK (IMAGE URL)</Form.Label>
-            <InputGroup className="mb-2">
-              <InputGroup.Text><ImageIcon size={16}/></InputGroup.Text>
-              <Form.Control placeholder="Paste Image URL here" value={evidence.imageUrl} onChange={(e) => setEvidence({...evidence, imageUrl: e.target.value})} />
-            </InputGroup>
-            <Button variant="success" className="w-100 fw-bold mt-3 py-2" onClick={handleFormSubmit}>
-              <Send size={16} className="me-2"/> SEND FOR APPROVAL
+
+            <div className="mb-3">
+              <Form.Label className="small fw-bold">PROOF OF WORK (DRIVE LINK)</Form.Label>
+              <InputGroup size="sm">
+                <InputGroup.Text className="bg-light">
+                  <LinkIcon size={14} className="text-muted"/>
+                </InputGroup.Text>
+                <Form.Control 
+                  type="url" 
+                  placeholder="Paste URL here..."
+                  required
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)} 
+                />
+              </InputGroup>
+            </div>
+
+            <Button 
+              variant="success" 
+              className="w-100 fw-bold mt-3 py-2" 
+              onClick={handleFormSubmit}
+              disabled={isSubmitting} 
+            >
+              {isSubmitting ? (
+                <><Spinner size="sm" className="me-2"/> SENDING...</>
+              ) : (
+                <><Send size={16} className="me-2"/> SEND FOR APPROVAL</>
+              )}
             </Button>
           </Form>
         </Modal.Body>

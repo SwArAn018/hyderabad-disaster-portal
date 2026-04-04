@@ -38,7 +38,6 @@ const Login = () => {
     }
 
     try {
-      // FIX 1: Changed /api/users to /api/login
       const response = await fetch(`${API_BASE_URL}/api/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,8 +50,10 @@ const Login = () => {
 
       if (response.ok) {
         localStorage.setItem('user', JSON.stringify(data.user));
+        
         if (data.user.role === 'worker') {
-          localStorage.setItem('userTeam', data.user.name); 
+          // Storing the worker's department instead of their name
+          localStorage.setItem('userTeam', data.user.dept); 
           navigate('/worker');
         } else {
           navigate('/citizen');
@@ -68,7 +69,6 @@ const Login = () => {
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     try {
-      // FIX 2: Changed localhost:5000 to ${API_BASE_URL}
       const response = await fetch(`${API_BASE_URL}/api/users`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,6 +92,11 @@ const Login = () => {
     }
   };
 
+  // UPDATED: Standard toggle controller for Bootstrap ToggleButtonGroup
+  const handleRoleChange = (val) => {
+    if (val) setRole(val);
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#f0f2f5', display: 'flex', alignItems: 'center', padding: '40px 0' }}>
       <Container>
@@ -111,14 +116,15 @@ const Login = () => {
                 
                 <Form onSubmit={handleLogin}>
                   <div className="text-center mb-4">
-                    <ToggleButtonGroup type="radio" name="roles" defaultValue={'citizen'} className="w-100 shadow-sm">
-                      <ToggleButton id="tbg-citizen" value={'citizen'} variant="outline-primary" onClick={() => setRole('citizen')}>
+                    {/* FIXED: Shifted onChange from individual buttons to the ToggleButtonGroup parent */}
+                    <ToggleButtonGroup type="radio" name="roles" value={role} onChange={handleRoleChange} className="w-100 shadow-sm">
+                      <ToggleButton id="tbg-citizen" value={'citizen'} variant="outline-primary">
                         <User size={16} className="me-1"/> Citizen
                       </ToggleButton>
-                      <ToggleButton id="tbg-worker" value={'worker'} variant="outline-primary" onClick={() => setRole('worker')}>
+                      <ToggleButton id="tbg-worker" value={'worker'} variant="outline-primary">
                         <HardHat size={16} className="me-1"/> Worker
                       </ToggleButton>
-                      <ToggleButton id="tbg-admin" value={'admin'} variant="outline-primary" onClick={() => setRole('admin')}>
+                      <ToggleButton id="tbg-admin" value={'admin'} variant="outline-primary">
                         <ShieldCheck size={16} className="me-1"/> Admin
                       </ToggleButton>
                     </ToggleButtonGroup>

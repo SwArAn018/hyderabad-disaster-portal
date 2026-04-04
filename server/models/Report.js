@@ -13,8 +13,17 @@ const ReportSchema = new mongoose.Schema({
   },
   status: { 
     type: String, 
-    enum: ["Pending", "Assigned", "Accepted", "Arrived", "Submitted for Review", "Resolved"], 
-    default: "Pending" 
+    // UPDATED: Aligned with your frontend dashboard strings
+    enum: [
+      "Pending Verification", 
+      "Under Investigation",
+      "Task Force Dispatched", 
+      "Worker On-Site", 
+      "Submitted for Review", 
+      "Resolved",
+      "Completed"
+    ], 
+    default: "Pending Verification" 
   },
   reporter: {
     name: { type: String, required: true },

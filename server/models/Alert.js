@@ -31,4 +31,7 @@ const AlertSchema = new mongoose.Schema({
   }
 });
 
+// OPTIONAL: Speeds up the queries used in your GET /api/alerts route
+AlertSchema.index({ isActive: 1, expiresAt: 1, timestamp: -1 });
+
 module.exports = mongoose.model('Alert', AlertSchema);

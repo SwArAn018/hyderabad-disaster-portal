@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Form, Button, InputGroup, Badge, ListGroup, Alert } from 'react-bootstrap';
 import AppNavbar from '../components/Navbar';
 import { MapContainer, TileLayer, Marker, useMapEvents, useMap, Rectangle } from 'react-leaflet'; 
-import { Navigation, Search, ImageIcon, Video, X, Clock, Send, AlertCircle, ShieldCheck, AlertTriangle } from 'lucide-react'; 
+import { Navigation, Search, ImageIcon, Video, X, Clock, Send, AlertCircle, ShieldCheck } from 'lucide-react'; 
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -39,7 +39,12 @@ const CitizenDashboard = () => {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [showForm, setShowForm] = useState(true); 
   const [myRequests, setMyRequests] = useState([]);
-  const [activeAlerts, setActiveAlerts] = useState([]); 
+
+  // State to hold the actual file to be uploaded
+  const [file, setFile] = useState(null);
+
+  // State to hold a local preview URL so the user can see what they picked
+  const [preview, setPreview] = useState('');
 
   const [formData, setFormData] = useState({
     fullName: currentUser.name || "", 
@@ -52,43 +57,12 @@ const CitizenDashboard = () => {
     details: {}
   });
 
-  // --- UPDATED: FETCH ALERTS FROM BACKEND OVERVIEW (RESEARCH LOGIC) ---
-  const fetchAlerts = async () => {
-    try {
-      // 1. Fetch manual admin-broadcasted alerts
-      const adminRes = await fetch(`${API_BASE_URL}/api/alerts`);
-      const adminData = adminRes.ok ? await adminRes.json() : [];
-
-      // 2. Fetch the "City Overview" from our backend (Weather + AQI + Zone Logic)
-      const overviewRes = await fetch(`${API_BASE_URL}/api/weather/overview`);
-      
-      if (overviewRes.ok) {
-        const zones = await overviewRes.json();
-        
-        // 3. Filter zones that are currently flagged as hazardous by our backend
-        const hazardZones = zones.filter(z => z.isHazardous);
-
-        // 4. Transform hazard zones into alert objects for the UI
-        const automatedAlerts = hazardZones.map(zone => {
-  // Check for the "Chemical Washout" condition we added in weather.js
-  const isChemical = (zone.condition === 'Rain' || zone.condition === 'Drizzle') && zone.so2 > 80;
-  
-  return {
-    _id: `auto-${zone.areaName}`,
-    title: isChemical ? `⚠️ TOXIC HAZARD: ${zone.areaName}` : `⚠️ CRITICAL: ${zone.areaName}`,
-    severity: isChemical || zone.isHazardous ? "Red" : "Orange",
-    area: zone.type || "Regional", // Shows if it's an 'Industrial' or 'Residential' zone
-    message: isChemical 
-      ? `Acid Rain Risk! High SO2 (${zone.so2}) detected during rainfall. Stay indoors.` 
-      : `${zone.condition} alert. AQI: ${zone.pm25}. ${zone.temp}°C. Use caution.`
-  };
-});
-
-        // Combine manual admin alerts with our automated hazard detections
-        setActiveAlerts([...automatedAlerts, ...adminData]);
-      }
-    } catch (error) { 
-      console.error("Alert Sync Error:", error); 
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    
+    if (selectedFile) {
+      setFile(selectedFile);
+      setPreview(URL.createObjectURL(selectedFile));
     }
   };
 
@@ -98,7 +72,9 @@ const CitizenDashboard = () => {
       if (response.ok) {
         const data = await response.json();
         const filteredData = data.filter(r => 
-          r.reporter && r.reporter.name === currentUser.name
+          // 👇 UPDATED FILTER HERE 👇
+          (r.reporter && r.reporter.name === currentUser.name) || 
+          r.reporterName === currentUser.name
         );
         setMyRequests(filteredData);
       }
@@ -107,11 +83,9 @@ const CitizenDashboard = () => {
 
   useEffect(() => {
     syncData();
-    fetchAlerts(); 
     const interval = setInterval(() => {
         syncData();
-        fetchAlerts(); 
-    }, 10000); // 10 second refresh for hazard monitoring
+    }, 10000); // 10 second refresh
     return () => clearInterval(interval);
   }, []);
 
@@ -161,37 +135,44 @@ const CitizenDashboard = () => {
 
     if (!formData.consent) return alert("Please accept the declaration to proceed.");
 
-    const reportPayload = {
-      type: issueType,
-      loc: position,
-      status: "Pending",
-      reporter: {
-        name: currentUser.name,
-        phone: formData.mobile,
-        pincode: formData.pincode,
-        landmark: formData.landmark
-      },
-      evidence: {
-        img: formData.imgUrl,
-        vid: formData.vidUrl,
-        categoryDetails: formData.details
-      },
-      timestamp: new Date().toISOString()
-    };
+    if (!file) return alert("Please upload a photo or video as evidence.");
+
+    // 1. Create a FormData instance to bundle the file and text data
+    const uploadData = new FormData();
+    
+    // FIXED: Changed key from 'media' to 'imgUrl' to match backend index.js Multer config!
+    uploadData.append('media', file);
+    
+    // Append the text fields
+    uploadData.append('type', issueType);
+    uploadData.append('loc', JSON.stringify(position)); // Parsed in backend
+    uploadData.append('reporterName', currentUser.name);
+    uploadData.append('reporterPhone', formData.mobile);
+    uploadData.append('reporterPincode', formData.pincode);
+    uploadData.append('reporterLandmark', formData.landmark);
+    uploadData.append('categoryDetails', JSON.stringify(formData.details)); // Parsed in backend
 
     try {
+      // 2. Send the request
       const response = await fetch(`${API_BASE_URL}/api/reports`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reportPayload),
+        // Notice: No 'Content-Type' header here. Fetch handles it automatically for FormData!
+        body: uploadData, 
       });
 
       if (response.ok) {
         setHasSubmitted(true);
         setShowForm(false);
+        setFile(null); // Clear the file
+        setPreview(''); // Clear the preview
         syncData();
+      } else {
+        alert("Upload failed. Please try again.");
       }
-    } catch (error) { alert("Connection Error"); }
+    } catch (error) { 
+      console.error("Submit error:", error);
+      alert("Connection Error"); 
+    }
   };
 
   const renderOfficialFields = () => {
@@ -266,26 +247,8 @@ const CitizenDashboard = () => {
             </MapContainer>
           </Col>
 
-          <Col md={5} lg={4} className="bg-white shadow-lg overflow-auto p-4 border-start" style={{zIndex: 1001}}>
+          <Col md={5} lg={4} className="bg-white shadow-lg overflow-auto p-4 border-start" style={{zIndex: 1001}}> 
             
-            {/* --- PROACTIVE ALERTS (NOW BASED ON BACKEND RESEARCH LOGIC) --- */}
-            {activeAlerts.length > 0 && activeAlerts.map(alert => (
-              <Alert 
-                key={alert._id} 
-                variant={alert.severity === 'Red' ? 'danger' : alert.severity === 'Orange' ? 'warning' : 'info'} 
-                className="mb-3 border-2 shadow-sm d-flex align-items-center animate__animated animate__fadeInDown"
-              >
-                <AlertTriangle className="me-3 text-dark" size={28} />
-                <div>
-                  <div className="fw-bold d-flex align-items-center">
-                    {alert.title} 
-                    <Badge bg="dark" className="ms-2" style={{fontSize: '10px'}}>{alert.area}</Badge>
-                  </div>
-                  <div className="small text-dark">{alert.message}</div>
-                </div>
-              </Alert>
-            ))}
-
             {showForm ? (
               <Form onSubmit={handleFinalSubmit}>
                 <div className="d-flex justify-content-between align-items-start mb-3">
@@ -331,15 +294,32 @@ const CitizenDashboard = () => {
                 {renderOfficialFields()}
 
                 <div className="mb-4">
-                  <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">4. EVIDENCE (LINKS)</h6>
-                  <InputGroup size="sm" className="mb-2">
-                    <InputGroup.Text><ImageIcon size={14}/></InputGroup.Text>
-                    <Form.Control placeholder="Photo URL*" required onChange={(e) => setFormData({...formData, imgUrl: e.target.value})} />
-                  </InputGroup>
-                  <InputGroup size="sm" className="mb-2">
-                    <InputGroup.Text><Video size={14}/></InputGroup.Text>
-                    <Form.Control placeholder="Video URL (Optional)" onChange={(e) => setFormData({...formData, vidUrl: e.target.value})} />
-                  </InputGroup>
+                  <h6 className="fw-bold text-primary border-bottom pb-1 mb-3 small">4. EVIDENCE (UPLOAD)</h6>
+                  
+                  <Form.Group className="mb-2">
+                    <Form.Control 
+                      type="file" 
+                      size="sm"
+                      accept="image/*,video/*" 
+                      required
+                      onChange={handleFileChange} 
+                    />
+                    <Form.Text className="text-muted" style={{ fontSize: '10px' }}>
+                      Upload an image or video of the incident (Max 50MB)
+                    </Form.Text>
+                  </Form.Group>
+
+                  {/* Live Preview Box */}
+                  {preview && (
+                    <div className="mt-2 p-2 border rounded bg-light text-center">
+                      {file && file.type.startsWith('image/') ? (
+                        <img src={preview} alt="Preview" style={{ maxWidth: '100%', maxHeight: '150px', borderRadius: '4px' }} />
+                      ) : (
+                        <video src={preview} controls style={{ maxWidth: '100%', maxHeight: '150px' }} />
+                      )}
+                      <div className="mt-1 small text-muted text-truncate">{file && file.name}</div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="p-2 bg-light rounded border mb-4">
@@ -406,5 +386,4 @@ const CitizenDashboard = () => {
     </div>
   );
 };
-
 export default CitizenDashboard;

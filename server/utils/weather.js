@@ -37,7 +37,6 @@ const getWeatherData = async (lat, lon, zoneType = "Residential", areaName = "Un
     // Fetch the AQI data
     const aqiData = await getAQIData(lat, lon);
 
-    // 👇 NEW: Pass zoneType and areaName into the engine!
     const compoundHazards = detectCompoundHazards(weatherResult, aqiData, zoneType, areaName);
 
     return {
@@ -45,7 +44,7 @@ const getWeatherData = async (lat, lon, zoneType = "Residential", areaName = "Un
       aqiData: aqiData, 
       aqi: aqiData.aqi, 
       compoundHazards: compoundHazards,
-      zoneType: zoneType // Sending this back so the UI knows the zone type too
+      zoneType: zoneType 
     };
 
   } catch (error) {
@@ -56,8 +55,8 @@ const getWeatherData = async (lat, lon, zoneType = "Residential", areaName = "Un
       description: "Service unavailable", 
       humidity: 0,
       isHazardous: false,
-      aqi: "N/A", 
-      aqiData: { aqi: "N/A" },
+      aqi: 1, // FIXED: Keeping it as integer (Scale: 1-5)
+      aqiData: { aqi: 1, pm10: 0, pm2_5: 0, no2: 0, nh3: 0, so2: 0 }, // FIXED
       compoundHazards: [],
       zoneType: zoneType
     };
@@ -99,8 +98,7 @@ const detectCompoundHazards = (weather, aqiData, zoneType, areaName) => {
     });
   }
 
-  // 👇 4. NEW: STRICT RESIDENTIAL AIR THRESHOLD
-  // Stricter safety limits for neighborhoods where people live full-time.
+  // 4. STRICT RESIDENTIAL AIR THRESHOLD
   if (zoneType === "Residential" && aqiData.aqi >= 4) {
     hazards.push({
       type: "Severe Residential Pollution",
@@ -109,8 +107,7 @@ const detectCompoundHazards = (weather, aqiData, zoneType, areaName) => {
     });
   }
 
-  // 👇 5. NEW: INDUSTRIAL GAS DRIFT 
-  // High winds blowing pollutants out of industrial zones.
+  // 5. INDUSTRIAL GAS DRIFT 
   if (zoneType === "Industrial" && weather.windSpeed > 12 && aqiData.so2 > 20) {
     hazards.push({
       type: "Toxic Gas Dispersion",
@@ -143,7 +140,8 @@ const getAQIData = async (lat, lon) => {
     };
   } catch (error) {
     console.error("AQI API Error:", error.message);
-    return { aqi: 0, pm10: 0, pm2_5: 0, no2: 0, nh3: 0, so2: 0 };
+    // FIXED: Swapped 0 with 1 for the aqi scale base fallback
+    return { aqi: 1, pm10: 0, pm2_5: 0, no2: 0, nh3: 0, so2: 0 };
   }
 };
 

@@ -2,13 +2,13 @@ require('dotenv').config(); // Change this from 'import' to 'require'
 console.log("Checking DB URL:", process.env.MONGO_URI ? "Found ✅" : "Missing ❌");
 const express = require('express');
 const mongoose = require('mongoose');
+const path = require('path'); // 1. Moved this up!
+const multer = require('multer'); // 2. Moved this up!
 const cors = require('cors');
 const Report = require('./models/Report');
 const User = require('./models/User');
 const Alert = require('./models/Alert');
 const { getWeatherData, getAQIData, detectCompoundHazards } = require('./utils/weather');
-// Import the Weather Utility
-
 const { checkWeatherAndAlert } = require('./utils/weatherWatcher');
 const app = express();
 app.use(express.json());
@@ -17,12 +17,24 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
-
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // Initialize automated weather watching
 checkWeatherAndAlert();
 setInterval(() => {
   checkWeatherAndAlert();
 }, 900000); // 30 minutes
+// Configure where to store files and what to name them
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/'); // Make sure you create an 'uploads' folder in your backend directory!
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({ storage: storage });
 
 mongoose.connect(process.env.MONGO_URI)
 .then(() => console.log("✅ MongoDB Connected Successfully"))
@@ -101,148 +113,131 @@ app.get('/api/reports', async (req, res) => {
   }
 });
 
-// --- REPLACE THIS BLOCK ---
-app.post('/api/reports', async (req, res) => {
+// Add 'upload.single('media')' as the second argument here
+app.post('/api/reports', upload.single('media'), async (req, res) => {
   try {
-    const { loc, type } = req.body;
-
-    // 1. SENSING: Fetch Context (Weather & AQI)
-    // Note: Assuming you have getAQIData implemented to support PDF Algorithm 1
-    const weather = await getWeatherData(loc[0], loc[1]);
-    const aqiData = typeof getAQIData === 'function' ? await getAQIData(loc[0], loc[1]) : { aqi: 0 };
-
-    // 2. PROCESSING: AI Reliability & Compound Hazard Logic
-    let trustScore = 70; // Baseline
-    let trustReason = "Standard environmental match";
-
-    // A. Check for Compound Hazards (PDF Algorithm 1)
-    // This checks for Dust Storms, Heat Stress, etc.
-    const calculatedHazards = detectCompoundHazards(weather, aqiData);
-    const compoundMatch = calculatedHazards.find(h => 
-      h.type.toLowerCase().includes(type.toLowerCase())
-    );
-
-    if (compoundMatch) {
-      trustScore = 100;
-      trustReason = `Validated by Compound Hazard Logic: ${compoundMatch.type}`;
-    } 
-    // B. Basic Weather Correlation (Springer/Validation Method)
-    else if (weather && weather.condition !== "Offline") {
-      const isRainy = ["Rain", "Thunderstorm", "Drizzle"].includes(weather.condition);
-      const isVeryHot = weather.temp > 40;
-      const isWindy = weather.windSpeed > 10;
-
-      if (type === "Flooding") {
-        if (isRainy) {
-          trustScore = 98;
-          trustReason = "High correlation with live precipitation data";
-        } else if (weather.condition === "Clear") {
-          trustScore = 35;
-          trustReason = "Weather discrepancy: Flooding reported during clear skies";
-        }
-      } else if ((type === "Blocked Road" || type === "Infrastructure") && isWindy) {
-        trustScore = 90;
-        trustReason = "Validated by high wind speed sensors";
-      } else if (type === "Heat Wave" && isVeryHot) {
-        trustScore = 95;
-        trustReason = "Confirmed by thermal sensors";
-      }
+    // Multer puts the file info in req.file
+    if (!req.file) {
+      return res.status(400).json({ message: 'No file uploaded' });
     }
 
-    // 3. RESPONDING: Construct object with AI Metadata
-    const reportData = {
-      ...req.body,
-      // Auto-escalate severity if trust is very high or weather is hazardous
-      severity: (weather?.isHazardous || trustScore > 90) ? "High" : (req.body.severity || "Medium"),
-      reliabilityScore: trustScore,
-      trustReason: trustReason,
-      weatherContext: {
-        ...weather,
-        aqiSnapshot: aqiData.aqi // Snapshots the AQI at the time of report
-      }
+    // Since we used FormData and stringified objects on the front-end,
+    // we need to parse them back on the back-end!
+    const loc = JSON.parse(req.body.loc);
+    const categoryDetails = JSON.parse(req.body.categoryDetails);
+
+    // Construct the actual report document for MongoDB
+    const newReport = {
+      type: req.body.type,
+      loc: loc,
+      status: "Pending Verification",
+      reporter: {
+        name: req.body.reporterName,
+        phone: req.body.reporterPhone,
+        pincode: req.body.reporterPincode,
+        landmark: req.body.reporterLandmark
+      },
+      evidence: {
+        // Save the local path or URL to the file
+        img: `/uploads/${req.file.filename}`, 
+        categoryDetails: categoryDetails
+      },
+      timestamp: new Date().toISOString()
     };
+    // Replace the console.log and res.status block with this:
+    const savedReport = await Report.create(newReport);
+    
+    console.log("✅ Report saved to DB:", savedReport._id);
+    
+    res.status(201).json({ 
+      message: 'Report created successfully!', 
+      data: savedReport 
+    });
 
-    const newReport = new Report(reportData);
-    await newReport.save();
-
-    console.log(`🚀 AI Report: ${type} | Trust: ${trustScore}% | ${trustReason}`);
-    res.status(201).json(newReport);
-
-  } catch (err) {
-    console.error("Report Save Error:", err);
-    res.status(400).json({ message: "Failed: " + err.message });
+} catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 
 app.put('/api/reports/:id', async (req, res) => {
-  try {
-    const report = await Report.findById(req.params.id);
-    if (!report) return res.status(404).json({ message: "Report not found" });
+  try {
+    const report = await Report.findById(req.params.id);
+    if (!report) return res.status(404).json({ message: "Report not found" });
 
-    let updateData = { ...req.body };
+    // 🛡️ GUARD 1: Prevent crash if the body wasn't parsed
+    if (!req.body) {
+      return res.status(400).json({ message: "Invalid request: No data received." });
+    }
 
-    // --- ENHANCED ARRIVAL LOGIC ---
-    if (req.body.status === "Arrived") {
-      const serverTime = new Date(); // The "True" time on the server
-      const clientTime = new Date(); // The time the report was marked
-      
-      updateData.arrivalTimestamp = clientTime;
+    let updateData = { ...req.body };
 
-      // 1. --- TIMESTAMP INTEGRITY CHECK ---
-      if (req.body.clientTimestamp) {
-        const reportedTime = new Date(req.body.clientTimestamp);
-        // Calculate difference in minutes
-        const timeDiff = Math.abs(serverTime - reportedTime) / 1000 / 60;
+    // Now safe from throwing "undefined" crashes!
+    if (req.body.status === "Arrived") {
+      const serverTime = new Date();
+      const clientTime = new Date();
+      
+      updateData.arrivalTimestamp = clientTime;
 
-        if (timeDiff > 5) {
-          console.warn(`🕒 FRAUD ALERT: Timestamp Manipulation detected for report ${req.params.id}`);
-          // Add a flag to the database so the Admin knows
-          updateData.timeAuditStatus = "Flagged: Manual Time Change Detected";
-        } else {
-          updateData.timeAuditStatus = "Verified";
-        }
-      }
+      if (req.body.clientTimestamp) {
+        const reportedTime = new Date(req.body.clientTimestamp);
+        const timeDiff = Math.abs(serverTime - reportedTime) / 1000 / 60;
 
-      // 2. --- GEOSPATIAL AUDIT (The Haversine Check) ---
-      if (report.loc && req.body.workerLat && req.body.workerLon) {
-        const distance = getDistanceFromLatLonInKm(
-          req.body.workerLat, 
-          req.body.workerLon, 
-          report.loc[0], 
-          report.loc[1] 
-        );
+        if (timeDiff > 5) {
+          console.warn(`🕒 FRAUD ALERT: Timestamp Manipulation detected for report ${req.params.id}`);
+          updateData.timeAuditStatus = "Flagged: Manual Time Change Detected";
+        } else {
+          updateData.timeAuditStatus = "Verified";
+        }
+      }
 
-        const isNear = distance <= 0.2; // 200 Meters
-        
-        updateData.verifiedLocation = {
-          lat: req.body.workerLat,
-          lng: req.body.workerLon,
-          distanceFromSite: Math.round(distance * 1000),
-          verificationStatus: isNear ? "Verified" : "Flagged"
-        };
+      if (report.loc && req.body.workerLat && req.body.workerLon) {
+        const distance = getDistanceFromLatLonInKm(
+          req.body.workerLat, 
+          req.body.workerLon, 
+          report.loc[0], 
+          report.loc[1] 
+        );
 
-        console.log(`📍 Audit: Worker is ${Math.round(distance * 1000)}m from site. Status: ${isNear ? "✅" : "❌"}`);
-      } 
-      // 👇 NEW FALLBACK: Handle cases where phone GPS is turned off
-      else {
-        updateData.verifiedLocation = {
-          verificationStatus: "Flagged: Missing Worker GPS Data"
-        };
-        console.warn(`📍 Audit Failed: Report ${req.params.id} marked as arrived without worker coordinates.`);
-      }
+        const isNear = distance <= 0.2; // 200 Meters
+        
+        updateData.verifiedLocation = {
+          lat: req.body.workerLat,
+          lng: req.body.workerLon,
+          distanceFromSite: Math.round(distance * 1000),
+          verificationStatus: isNear ? "Verified" : "Flagged"
+        };
+
+        console.log(`📍 Audit: Worker is ${Math.round(distance * 1000)}m from site. Status: ${isNear ? "✅" : "❌"}`);
+      } else {
+        updateData.verifiedLocation = {
+          verificationStatus: "Flagged: Missing Worker GPS Data"
+        };
+      }
+    }
+
+    // 1. Separate the GDrive link string from the rest of the payload
+    const { "evidence.img": gDriveLink, ...sanitizedUpdates } = updateData;
+
+    // 2. Build the exact object we want to update
+    let finalUpdatePayload = { ...sanitizedUpdates };
+
+    // 3. If the link exists, force it to be stored as a strictly casted string
+    if (gDriveLink) {
+      finalUpdatePayload["evidence.img"] = String(gDriveLink);
     }
 
+    // 4. Pass the finalized payload to MongoDB
     const updatedReport = await Report.findByIdAndUpdate(
       req.params.id, 
-      updateData, 
+      finalUpdatePayload, 
       { new: true }
     );
-    
-    res.json(updatedReport);
-  } catch (err) {
-    console.error("Update Error:", err);
-    res.status(400).json({ message: "Update failed: " + err.message });
-  }
+    res.json(updatedReport);
+  } catch (err) {
+    console.error("Update Error:", err);
+    res.status(400).json({ message: "Update failed: " + err.message });
+  }
 });
 
 // --- PROACTIVE ALERT ROUTES ---
@@ -346,5 +341,50 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
 function deg2rad(deg) {
   return deg * (Math.PI / 180);
 }
+// --- WORKER ASSIGNMENTS ROUTE ---
+app.get('/api/reports/worker/:dept', async (req, res) => {
+  try {
+    const workerDept = req.params.dept;
+    
+    // Find all reports where the 'worker' field matches the worker's department
+    // and the status is NOT yet resolved.
+    const tasks = await Report.find({
+      worker: workerDept,
+      status: { $in: ["Assigned", "Accepted", "Arrived", "Submitted for Review"] }
+    }).sort({ timestamp: -1 });
+    
+    res.json(tasks);
+  } catch (err) {
+    console.error("Worker tasks fetch error:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+app.patch('/api/reports/:id/status', async (req, res) => {
+  try {
+    const updated = await Report.findByIdAndUpdate(req.params.id, { status: req.body.status }, { new: true });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+app.patch('/api/reports/:id/assign', async (req, res) => {
+  try {
+    const updated = await Report.findByIdAndUpdate(req.params.id, { worker: req.body.worker, status: "Task Force Dispatched" }, { new: true });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
+
+app.patch('/api/reports/:id/resolve', async (req, res) => {
+  try {
+    const updated = await Report.findByIdAndUpdate(req.params.id, { status: "Resolved" }, { new: true });
+    res.json(updated);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  }
+});
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
